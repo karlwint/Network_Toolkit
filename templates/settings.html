@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Network Toolkit{% endblock %}
+{% block page_title %}Settings & Credentials{% endblock %}
+
+{% block content %}
+<div class="fade-in" style="max-width: 800px;">
+    <p class="text-dim text-sm mb-16">
+        Credentials are stored in your browser session only — they are not persisted to disk.
+        Environment variables are used as fallback when session credentials are not set.
+    </p>
+
+    <!-- Meraki API Keys -->
+    <div class="card settings-section">
+        <h3 style="color: var(--accent);">☁ Meraki API Keys</h3>
+        <p class="text-dim text-sm" style="margin-bottom: 16px;">
+            Used by all Meraki tools (Dashboard, Sync). Two keys enable round-robin rate limit distribution.
+            Falls back to env vars: <span class="mono">MERAKI_API_KEY</span>, <span class="mono">MERAKI_API_KEY2</span>
+        </p>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">Primary API Key</label>
+                <input type="password" id="api_key" placeholder="Enter Meraki API key">
+            </div>
+            <div class="form-group">
+                <label class="form-label">API Key 2 (Optional)</label>
+                <input type="password" id="api_key_2" placeholder="Second API key for load balancing">
+            </div>
+        </div>
+    </div>
+
+    <!-- Cisco SSH Credentials -->
+    <div class="card settings-section">
+        <h3 style="color: var(--info);">⌘ Cisco SSH Credentials</h3>
+        <p class="text-dim text-sm" style="margin-bottom: 16px;">
+            Used by Cisco CLI Tools and Credential Audit scanner.
+        </p>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">SSH Username</label>
+                <input type="text" id="cisco_user" placeholder="Username">
+            </div>
+            <div class="form-group">
+                <label class="form-label">SSH Password</label>
+                <input type="password" id="cisco_pass" placeholder="Password">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Enable Secret (Optional)</label>
+            <input type="password" id="cisco_enable" placeholder="Enable secret (defaults to SSH password)">
+        </div>
+    </div>
+
+    <!-- Remediation Credentials -->
+    <div class="card settings-section">
+        <h3 style="color: var(--warning);">◆ Remediation Credentials</h3>
+        <p class="text-dim text-sm" style="margin-bottom: 16px;">
+            Used by Credential Audit remediation and RADIUS sync tools.
+        </p>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">Break-Glass Username</label>
+                <input type="text" id="breakglass_user" placeholder="New local account username">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Break-Glass Password</label>
+                <input type="password" id="breakglass_pass" placeholder="New local account password">
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">TACACS Username</label>
+                <input type="text" id="tacacs_user" placeholder="TACACS verification user">
+            </div>
+            <div class="form-group">
+                <label class="form-label">TACACS Password</label>
+                <input type="password" id="tacacs_pass" placeholder="TACACS verification password">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">RADIUS Shared Secret</label>
+            <input type="password" id="radius_secret" placeholder="RADIUS server shared secret">
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex gap-12" style="margin-bottom: 48px;">
+        <button class="btn btn-primary" onclick="saveAll()">Save All Credentials</button>
+        <button class="btn btn-danger" onclick="clearAll()">Clear All</button>
+    </div>
+    <div id="save-status" class="hidden" style="margin-top: -32px; margin-bottom: 48px;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function saveAll() {
+        const data = {};
+        const fields = [
+            'api_key', 'api_key_2',
+            'cisco_user', 'cisco_pass', 'cisco_enable',
+            'breakglass_user', 'breakglass_pass',
+            'tacacs_user', 'tacacs_pass', 'radius_secret',
+        ];
+        fields.forEach(id => {
+            const val = document.getElementById(id).value.trim();
+            if (val) data[id] = val;
+        });
+
+        if (Object.keys(data).length === 0) {
+            showStatus('No credentials entered', 'warning');
+            return;
+        }
+
+        try {
+            const resp = await API.post('/api/credentials', data);
+            if (resp.success) {
+                showStatus(`Saved ${resp.updated.length} credential(s) successfully`, 'success');
+                // Clear input fields after save
+                fields.forEach(id => document.getElementById(id).value = '');
+            } else {
+                showStatus(resp.error || 'Failed to save', 'error');
+            }
+        } catch (e) {
+            showStatus('Error: ' + e.message, 'error');
+        }
+    }
+
+    async function clearAll() {
+        if (!confirm('Clear all stored credentials from session?')) return;
+        try {
+            const resp = await API.post('/api/credentials/clear', {});
+            showStatus('All credentials cleared', 'success');
+        } catch (e) {
+            showStatus('Error: ' + e.message, 'error');
+        }
+    }
+
+    function showStatus(msg, type) {
+        const el = document.getElementById('save-status');
+        el.className = `badge badge-${type === 'success' ? 'success' : type === 'error' ? 'error' : 'warning'}`;
+        el.textContent = msg;
+        el.style.display = 'inline-flex';
+        setTimeout(() => el.style.display = 'none', 4000);
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Stack Inventory — Network Toolkit{% endblock %}
+{% block page_title %}Cisco Stack Inventory{% endblock %}
+
+{% block top_actions %}
+<span class="badge {% if has_creds %}badge-success{% else %}badge-error{% endif %}">
+    SSH {{ 'Ready' if has_creds else 'Not Configured' }}
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    {% if not has_creds %}
+    <div class="card" style="border-color: var(--error); margin-bottom: 24px;">
+        <p style="color: var(--error);">⚠ Cisco SSH credentials not configured. <a href="/settings">Go to Settings</a></p>
+    </div>
+    {% endif %}
+
+    <div class="grid-2">
+        <!-- Left: Config -->
+        <div>
+            <div class="card mb-16">
+                <div class="card-title mb-16">Stack IP Addresses</div>
+                <p class="text-dim text-sm" style="margin-bottom: 12px;">
+                    One IP per line. Optionally add a label with <span class="mono">IP | Label</span>
+                </p>
+                <div class="form-group">
+                    <textarea id="ip-input" style="min-height: 200px;"
+                              placeholder="10.0.0.1 | Core-Stack-1&#10;10.0.0.2 | Dist-Stack-2&#10;172.16.1.1&#10;172.16.1.2"></textarea>
+                </div>
+                <div class="form-group" style="max-width: 200px;">
+                    <label class="form-label">Threads</label>
+                    <input type="number" id="thread-count" value="8" min="1" max="50">
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-primary" onclick="startInventory()" id="start-btn">Collect Inventory</button>
+                    <button class="btn btn-danger" onclick="cancelJob()" id="cancel-btn" disabled>Cancel</button>
+                    <button class="btn btn-secondary" onclick="exportExcel()" id="export-btn" disabled>Export Excel</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title mb-16">
+                    Commands Executed Per Stack
+                </div>
+                <div class="mono text-sm" style="color: var(--text-secondary); line-height: 2;">
+                    <div><span style="color: var(--accent);">›</span> show version</div>
+                    <div><span style="color: var(--accent);">›</span> show switch detail</div>
+                    <div><span style="color: var(--accent);">›</span> show inventory</div>
+                    <div><span style="color: var(--accent);">›</span> show interfaces status</div>
+                    <div><span style="color: var(--accent);">›</span> show cdp neighbors</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Results -->
+        <div>
+            <!-- Progress & Stats -->
+            <div class="card mb-16">
+                <div class="flex justify-between items-center mb-16">
+                    <div class="card-title">Progress</div>
+                    <span id="job-status" class="badge badge-info">IDLE</span>
+                </div>
+                <div class="progress-bar mb-16">
+                    <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Stacks</div>
+                        <div class="stat-value" id="stat-stacks" style="font-size: 22px;">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">OK</div>
+                        <div class="stat-value" id="stat-ok" style="font-size: 22px; color: var(--success);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value" id="stat-failed" style="font-size: 22px; color: var(--error);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Members</div>
+                        <div class="stat-value" id="stat-members" style="font-size: 22px; color: var(--info);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">HW Components</div>
+                        <div class="stat-value" id="stat-hw" style="font-size: 22px; color: var(--purple);">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Tabs -->
+            <div class="card mb-16">
+                <div class="flex gap-8 mb-16">
+                    <button class="btn btn-sm btn-primary" id="tab-overview" onclick="showTab('overview')">Stack Overview</button>
+                    <button class="btn btn-sm btn-secondary" id="tab-members" onclick="showTab('members')">Stack Members</button>
+                </div>
+
+                <!-- Stack Overview Table -->
+                <div id="panel-overview" style="max-height: 300px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead><tr>
+                            <th>IP</th><th>Hostname</th><th>Status</th><th>Model</th>
+                            <th>IOS</th><th>Stack</th><th>HW</th>
+                        </tr></thead>
+                        <tbody id="overview-tbody"></tbody>
+                    </table>
+                </div>
+
+                <!-- Stack Members Table -->
+                <div id="panel-members" style="max-height: 300px; overflow-y: auto; display: none;">
+                    <table class="data-table">
+                        <thead><tr>
+                            <th>IP</th><th>Hostname</th><th>#</th><th>Role</th>
+                            <th>State</th><th>Model</th><th>MAC</th><th>Ports</th>
+                        </tr></thead>
+                        <tbody id="members-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Console -->
+            <div class="card">
+                <div class="card-title mb-16">Console</div>
+                <div class="console" id="console"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentJobId = null;
+
+    function showTab(tab) {
+        document.getElementById('panel-overview').style.display = tab === 'overview' ? '' : 'none';
+        document.getElementById('panel-members').style.display = tab === 'members' ? '' : 'none';
+        document.getElementById('tab-overview').className = 'btn btn-sm ' + (tab === 'overview' ? 'btn-primary' : 'btn-secondary');
+        document.getElementById('tab-members').className = 'btn btn-sm ' + (tab === 'members' ? 'btn-primary' : 'btn-secondary');
+    }
+
+    async function startInventory() {
+        const lines = document.getElementById('ip-input').value.trim().split('\n').filter(Boolean);
+        if (!lines.length) return alert('Enter stack IP addresses');
+        const threads = parseInt(document.getElementById('thread-count').value) || 8;
+
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('cancel-btn').disabled = false;
+        document.getElementById('export-btn').disabled = true;
+        document.getElementById('overview-tbody').innerHTML = '';
+        document.getElementById('members-tbody').innerHTML = '';
+        document.getElementById('console').innerHTML = '';
+
+        try {
+            const resp = await API.post('/inventory/api/scan', { entries: lines, threads });
+            currentJobId = resp.job_id;
+            pollJob(`/inventory/api/job/${currentJobId}`, updateStatus);
+        } catch (e) {
+            alert('Error: ' + e.message);
+            resetButtons();
+        }
+    }
+
+    function updateStatus(data) {
+        const pct = data.total > 0 ? (data.progress / data.total * 100) : 0;
+        document.getElementById('progress-fill').style.width = pct + '%';
+
+        const statusEl = document.getElementById('job-status');
+        statusEl.textContent = data.status.toUpperCase();
+        statusEl.className = 'badge ' + ({
+            running: 'badge-warning', complete: 'badge-success',
+            cancelled: 'badge-error',
+        }[data.status] || 'badge-info');
+
+        // Stats
+        if (data.stats) {
+            document.getElementById('stat-stacks').textContent = data.stats.stacks;
+            document.getElementById('stat-ok').textContent = data.stats.ok;
+            document.getElementById('stat-failed').textContent = data.stats.failed;
+            document.getElementById('stat-members').textContent = data.stats.members;
+            document.getElementById('stat-hw').textContent = data.stats.hw_components;
+        }
+
+        // Stack Overview table
+        if (data.stack_rows) {
+            document.getElementById('overview-tbody').innerHTML = data.stack_rows.map(r => {
+                const sc = r.status === 'OK' ? 'var(--success)' :
+                           r.status.includes('Auth') || r.status === 'Timeout' ? 'var(--warning)' : 'var(--error)';
+                return `<tr>
+                    <td>${r.ip}</td>
+                    <td>${r.hostname || r.label || '—'}</td>
+                    <td style="color: ${sc}; font-weight: 600;">${r.status}</td>
+                    <td style="color: var(--text-dim);">${r.model || '—'}</td>
+                    <td style="color: var(--text-dim);">${r.ios_version || '—'}</td>
+                    <td>${r.stack_size || '—'}</td>
+                    <td>${r.hw_component_count || '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Stack Members table
+        if (data.member_rows) {
+            document.getElementById('members-tbody').innerHTML = data.member_rows.map(r => {
+                const isActive = ['active', 'master'].includes((r.role || '').toLowerCase());
+                const rc = isActive ? 'color: var(--accent); font-weight: 600;' : '';
+                return `<tr>
+                    <td>${r.ip}</td>
+                    <td>${r.hostname || '—'}</td>
+                    <td>${r.member}</td>
+                    <td style="${rc}">${r.role}</td>
+                    <td>${r.state || '—'}</td>
+                    <td style="color: var(--text-dim);">${r.model || '—'}</td>
+                    <td class="mono" style="color: var(--text-dim);">${r.mac || '—'}</td>
+                    <td>${r.ports || '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // Console
+        if (data.log) {
+            const con = document.getElementById('console');
+            con.innerHTML = data.log.map(l => {
+                let cls = 'log-info';
+                if (l.includes('[OK  ]') || l.includes('[COMPLETE]')) cls = 'log-success';
+                else if (l.includes('[FAIL]') || l.includes('[ERROR]')) cls = 'log-error';
+                else if (l.includes('[CANCELLED]')) cls = 'log-warning';
+                return `<div class="${cls}">${escapeHtml(l)}</div>`;
+            }).join('');
+            con.scrollTop = con.scrollHeight;
+        }
+
+        if (['complete', 'cancelled'].includes(data.status)) {
+            resetButtons();
+            if (data.stack_rows && data.stack_rows.length > 0) {
+                document.getElementById('export-btn').disabled = false;
+            }
+        }
+    }
+
+    async function cancelJob() {
+        if (currentJobId) await API.post(`/inventory/api/job/${currentJobId}/cancel`, {});
+    }
+
+    function exportExcel() {
+        if (!currentJobId) return;
+        window.location.href = `/inventory/api/job/${currentJobId}/export`;
+    }
+
+    function resetButtons() {
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('cancel-btn').disabled = true;
+    }
+</script>
+{% endblock %}

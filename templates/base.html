@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Network Toolkit{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ─── CSS Variables ─────────────────────────────── */
+        :root {
+            --bg-darkest: #0B0E11;
+            --bg-dark: #101419;
+            --bg-mid: #171C23;
+            --bg-card: #1A2029;
+            --bg-hover: #222A35;
+            --bg-input: #141920;
+            --accent: #00D4AA;
+            --accent-dim: #00A88A;
+            --accent-glow: #00FFD0;
+            --accent-bg: #0D2B26;
+            --success: #34D399;
+            --warning: #FBBF24;
+            --error: #F87171;
+            --info: #60A5FA;
+            --purple: #A78BFA;
+            --text-primary: #E8ECF1;
+            --text-secondary: #8B95A5;
+            --text-dim: #5A6577;
+            --border: #232B37;
+            --border-focus: #00D4AA;
+            --sidebar-w: 260px;
+            --header-h: 56px;
+        }
+
+        /* ─── Reset & Base ──────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%; overflow: hidden;
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-darkest); color: var(--text-primary);
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { color: var(--accent-glow); }
+
+        /* ─── Layout ────────────────────────────────────── */
+        .app-layout { display: flex; height: 100vh; }
+
+        /* ─── Sidebar ───────────────────────────────────── */
+        .sidebar {
+            width: var(--sidebar-w); min-width: var(--sidebar-w);
+            background: var(--bg-dark);
+            border-right: 1px solid var(--border);
+            display: flex; flex-direction: column;
+            z-index: 10;
+        }
+        .sidebar-brand {
+            height: var(--header-h);
+            display: flex; align-items: center; gap: 10px;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        .sidebar-brand .brand-icon {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, #00D4AA, #007A6E);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            position: relative;
+            box-shadow: 0 0 16px rgba(0, 212, 170, 0.25), inset 0 1px 0 rgba(255,255,255,0.15);
+        }
+        .sidebar-brand .brand-icon svg {
+            width: 20px; height: 20px;
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,0.2));
+        }
+        .sidebar-brand .brand-icon::after {
+            content: '';
+            position: absolute;
+            top: -1px; left: -1px; right: -1px; bottom: -1px;
+            border-radius: 11px;
+            background: linear-gradient(135deg, rgba(0,255,208,0.3), transparent 60%);
+            pointer-events: none;
+        }
+        .sidebar-brand h1 {
+            font-size: 15px; font-weight: 600;
+            letter-spacing: -0.3px;
+            background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .sidebar-nav { flex: 1; padding: 12px; overflow-y: auto; }
+        .nav-section-label {
+            font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--text-dim);
+            padding: 16px 12px 8px;
+        }
+        .nav-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 12px; border-radius: 8px;
+            font-size: 13px; font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.15s ease;
+            cursor: pointer; text-decoration: none;
+        }
+        .nav-item:hover {
+            background: var(--bg-hover); color: var(--text-primary);
+        }
+        .nav-item.active {
+            background: var(--accent-bg); color: var(--accent);
+        }
+        .nav-item .nav-icon {
+            width: 20px; height: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px;
+        }
+        .nav-item .nav-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            margin-left: auto; flex-shrink: 0;
+        }
+
+        /* ─── Main Content ──────────────────────────────── */
+        .main-content {
+            flex: 1; display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .top-bar {
+            height: var(--header-h); min-height: var(--header-h);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 24px;
+            background: var(--bg-dark);
+            border-bottom: 1px solid var(--border);
+        }
+        .top-bar h2 {
+            font-size: 16px; font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+        .top-bar-actions { display: flex; gap: 8px; align-items: center; }
+
+        .content-area {
+            flex: 1; overflow-y: auto; padding: 24px;
+        }
+
+        /* ─── Cards ─────────────────────────────────────── */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .card-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            font-size: 14px; font-weight: 600;
+            letter-spacing: -0.2px;
+        }
+
+        /* ─── Buttons ───────────────────────────────────── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 16px; border-radius: 8px;
+            font-family: inherit; font-size: 13px; font-weight: 600;
+            border: none; cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-primary {
+            background: var(--accent); color: var(--bg-darkest);
+        }
+        .btn-primary:hover { background: var(--accent-glow); }
+        .btn-primary:disabled {
+            opacity: 0.5; cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: var(--bg-hover); color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover {
+            background: var(--border); color: var(--text-primary);
+        }
+        .btn-danger {
+            background: #3B1A1A; color: var(--error);
+            border: 1px solid #5C2020;
+        }
+        .btn-danger:hover { background: #4A2020; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .btn-icon {
+            width: 36px; height: 36px; padding: 0;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 8px;
+        }
+
+        /* ─── Form Elements ─────────────────────────────── */
+        .form-group { margin-bottom: 16px; }
+        .form-label {
+            display: block; font-size: 12px; font-weight: 600;
+            color: var(--text-secondary); margin-bottom: 6px;
+            letter-spacing: 0.3px; text-transform: uppercase;
+        }
+        input[type="text"], input[type="password"], input[type="number"],
+        select, textarea {
+            width: 100%; padding: 10px 12px;
+            background: var(--bg-input); color: var(--text-primary);
+            border: 1px solid var(--border); border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace; font-size: 13px;
+            transition: border-color 0.15s;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none; border-color: var(--border-focus);
+        }
+        textarea {
+            resize: vertical; min-height: 100px;
+        }
+
+        /* ─── Tables ────────────────────────────────────── */
+        .data-table {
+            width: 100%; border-collapse: collapse;
+            font-size: 13px;
+        }
+        .data-table th {
+            text-align: left; padding: 10px 12px;
+            font-size: 11px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--text-dim);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-mid);
+            position: sticky; top: 0;
+        }
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+        }
+        .data-table tr:hover td { background: var(--bg-hover); }
+
+        /* ─── Status Badges ─────────────────────────────── */
+        .badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 8px; border-radius: 6px;
+            font-size: 11px; font-weight: 600;
+        }
+        .badge-success { background: #0D2B1A; color: var(--success); }
+        .badge-warning { background: #2B2510; color: var(--warning); }
+        .badge-error { background: #2B1010; color: var(--error); }
+        .badge-info { background: #101A2B; color: var(--info); }
+
+        /* ─── Progress Bar ──────────────────────────────── */
+        .progress-bar {
+            width: 100%; height: 6px; border-radius: 3px;
+            background: var(--bg-mid); overflow: hidden;
+        }
+        .progress-bar-fill {
+            height: 100%; border-radius: 3px;
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+            transition: width 0.3s ease;
+        }
+
+        /* ─── Console Log ───────────────────────────────── */
+        .console {
+            background: var(--bg-darkest);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .console .log-success { color: var(--success); }
+        .console .log-error { color: var(--error); }
+        .console .log-warning { color: var(--warning); }
+        .console .log-info { color: var(--info); }
+
+        /* ─── Stat Cards Grid ───────────────────────────── */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .stat-card {
+            background: var(--bg-mid);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .stat-card .stat-label {
+            font-size: 11px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--text-dim); margin-bottom: 6px;
+        }
+        .stat-card .stat-value {
+            font-size: 28px; font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* ─── Utility ───────────────────────────────────── */
+        .flex { display: flex; }
+        .gap-8 { gap: 8px; }
+        .gap-12 { gap: 12px; }
+        .gap-16 { gap: 16px; }
+        .gap-24 { gap: 24px; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        .mt-8 { margin-top: 8px; }
+        .mt-16 { margin-top: 16px; }
+        .mt-24 { margin-top: 24px; }
+        .mb-16 { margin-bottom: 16px; }
+        .text-dim { color: var(--text-dim); }
+        .text-sm { font-size: 12px; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .hidden { display: none; }
+
+        /* ─── Animations ────────────────────────────────── */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.3s ease; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse { animation: pulse 2s ease infinite; }
+
+        /* ─── Scrollbar ─────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border); border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+        /* ─── Module Card (Dashboard) ───────────────────── */
+        .module-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .module-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .module-card::before {
+            content: '';
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 3px;
+            background: var(--module-color);
+        }
+        .module-card:hover {
+            border-color: var(--module-color);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .module-card .module-icon {
+            width: 44px; height: 44px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; margin-bottom: 16px;
+        }
+        .module-card h3 {
+            font-size: 16px; font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .module-card p {
+            font-size: 13px; color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* ─── Settings Page ─────────────────────────────── */
+        .settings-section {
+            margin-bottom: 32px;
+        }
+        .settings-section h3 {
+            font-size: 14px; font-weight: 600;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Hub node -->
+                        <circle cx="12" cy="12" r="3.5" fill="#0B0E11" stroke="#0B0E11" stroke-width="0.5"/>
+                        <circle cx="12" cy="12" r="2" fill="#00FFD0"/>
+                        <!-- Spoke nodes -->
+                        <circle cx="4.5" cy="5" r="1.8" fill="#0B0E11"/><circle cx="4.5" cy="5" r="1" fill="#E8ECF1"/>
+                        <circle cx="19.5" cy="5" r="1.8" fill="#0B0E11"/><circle cx="19.5" cy="5" r="1" fill="#E8ECF1"/>
+                        <circle cx="4.5" cy="19" r="1.8" fill="#0B0E11"/><circle cx="4.5" cy="19" r="1" fill="#E8ECF1"/>
+                        <circle cx="19.5" cy="19" r="1.8" fill="#0B0E11"/><circle cx="19.5" cy="19" r="1" fill="#E8ECF1"/>
+                        <!-- Links -->
+                        <line x1="6" y1="6" x2="10" y2="10.5" stroke="#00D4AA" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+                        <line x1="18" y1="6" x2="14" y2="10.5" stroke="#00D4AA" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+                        <line x1="6" y1="18" x2="10" y2="13.5" stroke="#00D4AA" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+                        <line x1="18" y1="18" x2="14" y2="13.5" stroke="#00D4AA" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+                    </svg>
+                </div>
+                <h1>Network Toolkit</h1>
+            </div>
+            <div class="sidebar-nav">
+                <div class="nav-section-label">Navigation</div>
+                <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">
+                    <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span> Dashboard
+                </a>
+
+                <div class="nav-section-label">Tools</div>
+                {% for mod in modules %}
+                <a href="{{ mod.url }}" class="nav-item {% if request.path.startswith(mod.url) %}active{% endif %}">
+                    <span class="nav-icon" id="nav-icon-{{ mod.id }}"></span>
+                    {{ mod.name }}
+                    <span class="nav-dot" style="background: {{ mod.color }};"></span>
+                </a>
+                {% endfor %}
+
+                <div class="nav-section-label">System</div>
+                <a href="/settings" class="nav-item {% if request.path == '/settings' %}active{% endif %}">
+                    <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="top-bar">
+                <h2>{% block page_title %}Dashboard{% endblock %}</h2>
+                <div class="top-bar-actions">
+                    {% block top_actions %}{% endblock %}
+                </div>
+            </div>
+            <div class="content-area">
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // SVG icons for modules
+        const ICONS = {
+            cloud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>`,
+            terminal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+                <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+            shield: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+            refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+            layers: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/>
+                <polyline points="2 12 12 17 22 12"/></svg>`,
+        };
+
+        // Shared utilities
+        const API = {
+            async get(url) {
+                const resp = await fetch(url);
+                return resp.json();
+            },
+            async post(url, data) {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data),
+                });
+                return resp.json();
+            },
+        };
+
+        function pollJob(url, callback, interval = 1000) {
+            const poll = async () => {
+                const data = await API.get(url);
+                callback(data);
+                if (data.status !== 'complete' && data.status !== 'error' && data.status !== 'cancelled') {
+                    setTimeout(poll, interval);
+                }
+            };
+            poll();
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Heartbeat — tells the server the browser is still open.
+        // If all tabs close, the server auto-shuts down after 15 seconds.
+        setInterval(() => {
+            fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
+        }, 5000);
+
+        // Populate sidebar nav icons
+        const iconMap = {
+            {% for mod in modules %}'{{ mod.id }}': '{{ mod.icon }}',{% endfor %}
+        };
+        Object.entries(iconMap).forEach(([id, icon]) => {
+            const el = document.getElementById('nav-icon-' + id);
+            if (el && ICONS[icon]) {
+                el.innerHTML = ICONS[icon].replace(/width="22"/g, 'width="16"').replace(/height="22"/g, 'height="16"');
+            }
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

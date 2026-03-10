@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% block title %}Meraki Sync — Network Toolkit{% endblock %}
+{% block page_title %}Meraki Bulk Sync Tools{% endblock %}
+
+{% block top_actions %}
+<span class="badge {% if has_key %}badge-success{% else %}badge-error{% endif %}">
+    API {{ 'Ready' if has_key else 'Not Configured' }}
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    {% if not has_key %}
+    <div class="card" style="border-color: var(--error); margin-bottom: 24px;">
+        <p style="color: var(--error);">⚠ Meraki API key not configured. <a href="/settings">Go to Settings</a></p>
+    </div>
+    {% endif %}
+
+    <!-- Shared: Org & Network Selection -->
+    <div class="card mb-16">
+        <div class="card-header">
+            <div class="card-title">Organization & Networks</div>
+            <button class="btn btn-sm btn-primary" onclick="loadOrgs()">Load Organizations</button>
+        </div>
+        <div class="flex gap-12 items-center mb-16">
+            <select id="org-select" style="flex: 1;" onchange="loadNetworks()">
+                <option value="">Select organization...</option>
+            </select>
+            <span id="net-count" class="text-dim text-sm mono"></span>
+        </div>
+
+        <!-- Network List -->
+        <div id="network-panel" style="display: none;">
+            <div class="flex justify-between items-center mb-16">
+                <div class="flex gap-8 items-center">
+                    <input type="text" id="net-filter" placeholder="Filter networks..."
+                           style="width: 240px;" oninput="filterNetworks()">
+                    <button class="btn btn-sm btn-secondary" onclick="netSelectAll()">Select All</button>
+                    <button class="btn btn-sm btn-secondary" onclick="netSelectNone()">Deselect All</button>
+                </div>
+                <span id="net-selected" class="text-dim text-sm"></span>
+            </div>
+            <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+                <table class="data-table">
+                    <thead><tr>
+                        <th style="width: 30px;"><input type="checkbox" id="net-check-all" onchange="netToggleAll()"></th>
+                        <th>Network</th>
+                        <th>Types</th>
+                    </tr></thead>
+                    <tbody id="net-tbody"></tbody>
+                </table>
+            </div>
+            <p class="text-dim text-sm mt-8">Leave all unchecked to sync ALL eligible networks.</p>
+        </div>
+    </div>
+
+    <!-- Tab Selector -->
+    <div class="flex gap-8 mb-16">
+        <button class="btn btn-primary" id="tab-radius" onclick="showTab('radius')">RADIUS Sync</button>
+        <button class="btn btn-secondary" id="tab-dns" onclick="showTab('dns')">DNS Sync</button>
+    </div>
+
+    <!-- ═══ RADIUS Sync Panel ═══ -->
+    <div id="panel-radius">
+        <div class="grid-2">
+            <div>
+                <div class="card mb-16">
+                    <div class="card-title mb-16" style="color: var(--purple);">⟳ RADIUS Server Sync</div>
+                    <p class="text-dim text-sm mb-16">
+                        Syncs RADIUS auth & accounting servers on the target SSID across selected networks.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Target SSID</label>
+                        <input type="text" id="radius-ssid" value="hccuser">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">RADIUS Auth Servers (one IP per line, order = priority, port 1812 implied)</label>
+                        <textarea id="radius-auth" style="min-height: 80px;" placeholder="172.26.116.6&#10;172.26.116.22&#10;10.39.80.113"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">RADIUS Accounting Servers (one IP per line, port 1813 implied)</label>
+                        <textarea id="radius-acct" style="min-height: 80px;" placeholder="172.26.116.6&#10;172.26.116.22&#10;10.39.80.113"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">RADIUS Shared Secret</label>
+                        <input type="password" id="radius-secret" placeholder="Enter RADIUS shared secret">
+                    </div>
+                    <div class="flex gap-8">
+                        <button class="btn btn-primary" onclick="startRadiusSync()" id="radius-btn">Start RADIUS Sync</button>
+                        <button class="btn btn-danger" onclick="cancelSync('radius')" id="radius-cancel" disabled>Cancel</button>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="card mb-16">
+                    <div class="flex justify-between items-center mb-16">
+                        <div class="card-title">Sync Progress</div>
+                        <span id="radius-status" class="badge badge-info">IDLE</span>
+                    </div>
+                    <div class="progress-bar mb-16">
+                        <div class="progress-bar-fill" id="radius-progress" style="width: 0%;"></div>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-label">Updated</div>
+                            <div class="stat-value" id="radius-updated" style="font-size: 22px; color: var(--success);">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Errors</div>
+                            <div class="stat-value" id="radius-errors" style="font-size: 22px; color: var(--error);">0</div></div>
+                        <div class="stat-card"><div class="stat-label">No Match</div>
+                            <div class="stat-value" id="radius-nomatch" style="font-size: 22px; color: var(--text-dim);">0</div></div>
+                    </div>
+                </div>
+                <div class="card"><div class="card-title mb-16">Console</div>
+                    <div class="console" id="radius-console"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ DNS Sync Panel ═══ -->
+    <div id="panel-dns" style="display: none;">
+        <div class="grid-2">
+            <div>
+                <div class="card mb-16">
+                    <div class="card-title mb-16" style="color: var(--info);">⟳ DNS Server Sync</div>
+                    <p class="text-dim text-sm mb-16">
+                        Syncs DNS nameservers on specified VLANs across selected MX networks.
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">Target VLANs (comma separated)</label>
+                        <input type="text" id="dns-vlans" placeholder="300, 400">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">DNS Servers (one per line)</label>
+                        <textarea id="dns-servers" style="min-height: 120px;" placeholder="172.26.115.62&#10;8.8.8.8&#10;8.8.4.4"></textarea>
+                    </div>
+                    <div class="flex gap-8">
+                        <button class="btn btn-primary" onclick="startDnsSync()" id="dns-btn">Start DNS Sync</button>
+                        <button class="btn btn-danger" onclick="cancelSync('dns')" id="dns-cancel" disabled>Cancel</button>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="card mb-16">
+                    <div class="flex justify-between items-center mb-16">
+                        <div class="card-title">Sync Progress</div>
+                        <span id="dns-status" class="badge badge-info">IDLE</span>
+                    </div>
+                    <div class="progress-bar mb-16">
+                        <div class="progress-bar-fill" id="dns-progress" style="width: 0%;"></div>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-label">Updated</div>
+                            <div class="stat-value" id="dns-updated" style="font-size: 22px; color: var(--success);">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Skipped</div>
+                            <div class="stat-value" id="dns-skipped" style="font-size: 22px; color: var(--warning);">0</div></div>
+                        <div class="stat-card"><div class="stat-label">Errors</div>
+                            <div class="stat-value" id="dns-err" style="font-size: 22px; color: var(--error);">0</div></div>
+                    </div>
+                </div>
+                <div class="card"><div class="card-title mb-16">Console</div>
+                    <div class="console" id="dns-console"></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let allNetworks = [];
+    let radiusJobId = null, dnsJobId = null;
+
+    function showTab(tab) {
+        document.getElementById('panel-radius').style.display = tab === 'radius' ? '' : 'none';
+        document.getElementById('panel-dns').style.display = tab === 'dns' ? '' : 'none';
+        document.getElementById('tab-radius').className = tab === 'radius' ? 'btn btn-primary' : 'btn btn-secondary';
+        document.getElementById('tab-dns').className = tab === 'dns' ? 'btn btn-primary' : 'btn btn-secondary';
+    }
+
+    // ─── Org & Network Selection ─────────────────────
+    // Uses the same /meraki/api/ endpoints as the Dashboard module
+
+    async function loadOrgs() {
+        const sel = document.getElementById('org-select');
+        sel.innerHTML = '<option value="">Loading...</option>';
+        try {
+            const orgs = await API.get('/meraki/api/organizations');
+            if (orgs.error) {
+                sel.innerHTML = `<option value="">Error: ${orgs.error}</option>`;
+                return;
+            }
+            sel.innerHTML = '<option value="">Select organization...</option>' +
+                orgs.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+        } catch (e) {
+            sel.innerHTML = '<option value="">Error loading orgs</option>';
+        }
+    }
+
+    async function loadNetworks() {
+        const orgId = document.getElementById('org-select').value;
+        if (!orgId) { document.getElementById('network-panel').style.display = 'none'; return; }
+        document.getElementById('net-count').textContent = 'Loading networks...';
+        try {
+            const resp = await fetch(`/meraki/api/org-networks/${orgId}`);
+            const data = await resp.json();
+            console.log('Networks response:', resp.status, data);
+            if (!resp.ok) {
+                document.getElementById('net-count').textContent = 'Error ' + resp.status + ': ' + (data.error || resp.statusText);
+                return;
+            }
+            if (data.error) {
+                document.getElementById('net-count').textContent = 'Error: ' + data.error;
+                return;
+            }
+            allNetworks = data.map(n => ({
+                id: n.id,
+                name: n.name,
+                productTypes: n.productTypes || [],
+            })).sort((a, b) => a.name.localeCompare(b.name));
+
+            renderNetworks(allNetworks);
+            document.getElementById('net-count').textContent = `${allNetworks.length} networks`;
+            document.getElementById('network-panel').style.display = '';
+        } catch (e) {
+            console.error('loadNetworks error:', e);
+            document.getElementById('net-count').textContent = 'Error: ' + e.message;
+        }
+    }
+
+    function renderNetworks(networks) {
+        document.getElementById('net-tbody').innerHTML = networks.map(n => {
+            const types = (n.productTypes || []).map(t =>
+                `<span class="badge badge-info" style="margin-right:4px">${t}</span>`).join('');
+            return `<tr>
+                <td><input type="checkbox" class="net-check" value="${n.id}"></td>
+                <td>${escapeHtml(n.name)}</td>
+                <td>${types}</td>
+            </tr>`;
+        }).join('');
+        updateNetSelected();
+    }
+
+    function filterNetworks() {
+        const q = document.getElementById('net-filter').value.toLowerCase();
+        renderNetworks(allNetworks.filter(n => n.name.toLowerCase().includes(q)));
+    }
+
+    function getSelectedNetworkIds() {
+        return [...document.querySelectorAll('.net-check:checked')].map(c => c.value);
+    }
+    function netSelectAll() { document.querySelectorAll('.net-check').forEach(c => c.checked = true); updateNetSelected(); }
+    function netSelectNone() { document.querySelectorAll('.net-check').forEach(c => c.checked = false); updateNetSelected(); }
+    function netToggleAll() {
+        const v = document.getElementById('net-check-all').checked;
+        document.querySelectorAll('.net-check').forEach(c => c.checked = v);
+        updateNetSelected();
+    }
+    function updateNetSelected() {
+        const n = getSelectedNetworkIds().length;
+        document.getElementById('net-selected').textContent = n ? `${n} selected` : 'All networks (none selected)';
+    }
+    document.addEventListener('change', e => { if (e.target.classList.contains('net-check')) updateNetSelected(); });
+
+    // ─── Server Parsing ──────────────────────────────
+    // Preserves order (first = highest priority). Port is optional — defaults to 1812/1813.
+    function parseHostPort(text, defaultPort) {
+        return text.trim().split('\n').filter(Boolean).map(line => {
+            line = line.trim();
+            if (line.includes(':')) {
+                const [host, port] = line.split(':');
+                return { host: host.trim(), port: parseInt(port) || defaultPort };
+            }
+            return { host: line, port: defaultPort };
+        });
+    }
+
+    // ─── RADIUS Sync ─────────────────────────────────
+    async function startRadiusSync() {
+        const orgId = document.getElementById('org-select').value;
+        if (!orgId) return alert('Select an organization first');
+        const authServers = parseHostPort(document.getElementById('radius-auth').value, 1812);
+        const acctServers = parseHostPort(document.getElementById('radius-acct').value, 1813);
+        if (!authServers.length) return alert('Enter at least one RADIUS auth server');
+
+        const networkIds = getSelectedNetworkIds();
+        const count = networkIds.length || 'ALL';
+        const serverList = authServers.map((s, i) => `  ${i+1}. ${s.host}:${s.port}`).join('\n');
+        const msg = `Sync RADIUS servers to ${count} network(s)?\n\n` +
+            `SSID: ${document.getElementById('radius-ssid').value}\n\n` +
+            `Auth servers (in priority order):\n${serverList}\n\n` +
+            `This will REPLACE all existing RADIUS servers on the target SSID.`;
+        if (!confirm(msg)) return;
+
+        document.getElementById('radius-btn').disabled = true;
+        document.getElementById('radius-cancel').disabled = false;
+        document.getElementById('radius-console').innerHTML = '';
+
+        try {
+            const resp = await fetch('/sync/api/radius-sync', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    org_id: orgId,
+                    network_ids: networkIds,
+                    target_ssid: document.getElementById('radius-ssid').value,
+                    radius_servers: authServers,
+                    acct_servers: acctServers,
+                    radius_secret: document.getElementById('radius-secret').value.trim(),
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                alert('Error: ' + (data.error || resp.statusText));
+                document.getElementById('radius-btn').disabled = false;
+                document.getElementById('radius-cancel').disabled = true;
+                return;
+            }
+            radiusJobId = data.job_id;
+            pollJob(`/sync/api/job/${radiusJobId}`, d => updateSyncStatus('radius', d));
+        } catch (e) {
+            alert('Error: ' + (e.message || JSON.stringify(e)));
+            document.getElementById('radius-btn').disabled = false;
+            document.getElementById('radius-cancel').disabled = true;
+        }
+    }
+
+    // ─── DNS Sync ────────────────────────────────────
+    async function startDnsSync() {
+        const orgId = document.getElementById('org-select').value;
+        if (!orgId) return alert('Select an organization first');
+        const vlans = document.getElementById('dns-vlans').value.split(',').map(v => parseInt(v.trim())).filter(Boolean);
+        const dnsServers = document.getElementById('dns-servers').value.trim();
+        if (!vlans.length) return alert('Enter target VLANs');
+        if (!dnsServers) return alert('Enter DNS servers');
+
+        const networkIds = getSelectedNetworkIds();
+        const count = networkIds.length || 'ALL';
+        if (!confirm(`Sync DNS servers to VLANs ${vlans.join(', ')} on ${count} network(s)?`)) return;
+
+        document.getElementById('dns-btn').disabled = true;
+        document.getElementById('dns-cancel').disabled = false;
+        document.getElementById('dns-console').innerHTML = '';
+
+        try {
+            const resp = await fetch('/sync/api/dns-sync', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    org_id: orgId,
+                    network_ids: networkIds,
+                    target_vlans: vlans,
+                    dns_servers: dnsServers,
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                alert('Error: ' + (data.error || resp.statusText));
+                document.getElementById('dns-btn').disabled = false;
+                document.getElementById('dns-cancel').disabled = true;
+                return;
+            }
+            dnsJobId = data.job_id;
+            pollJob(`/sync/api/job/${dnsJobId}`, d => updateSyncStatus('dns', d));
+        } catch (e) {
+            alert('Error: ' + (e.message || JSON.stringify(e)));
+            document.getElementById('dns-btn').disabled = false;
+            document.getElementById('dns-cancel').disabled = true;
+        }
+    }
+
+    // ─── Status Updates ──────────────────────────────
+    function updateSyncStatus(type, data) {
+        const pct = data.total > 0 ? (data.progress / data.total * 100) : 0;
+        document.getElementById(`${type}-progress`).style.width = pct + '%';
+
+        const statusEl = document.getElementById(`${type}-status`);
+        statusEl.textContent = data.status.toUpperCase();
+        statusEl.className = 'badge ' + ({
+            running: 'badge-warning', complete: 'badge-success',
+            cancelled: 'badge-error', error: 'badge-error',
+        }[data.status] || 'badge-info');
+
+        if (type === 'radius') {
+            document.getElementById('radius-updated').textContent = data.updated;
+            document.getElementById('radius-errors').textContent = data.errors;
+            document.getElementById('radius-nomatch').textContent = data.no_match;
+        } else {
+            document.getElementById('dns-updated').textContent = data.updated;
+            document.getElementById('dns-skipped').textContent = data.skipped;
+            document.getElementById('dns-err').textContent = data.errors;
+        }
+
+        if (data.log) {
+            const con = document.getElementById(`${type}-console`);
+            con.innerHTML = data.log.map(l => {
+                let cls = 'log-info';
+                if (l.includes('✅')) cls = 'log-success';
+                else if (l.includes('❌') || l.includes('Error')) cls = 'log-error';
+                else if (l.includes('Complete')) cls = 'log-warning';
+                return `<div class="${cls}">${escapeHtml(l)}</div>`;
+            }).join('');
+            con.scrollTop = con.scrollHeight;
+        }
+
+        if (['complete', 'cancelled', 'error'].includes(data.status)) {
+            document.getElementById(`${type}-btn`).disabled = false;
+            document.getElementById(`${type}-cancel`).disabled = true;
+        }
+    }
+
+    async function cancelSync(type) {
+        const jobId = type === 'radius' ? radiusJobId : dnsJobId;
+        if (jobId) await API.post(`/sync/api/job/${jobId}/cancel`, {});
+    }
+
+    {% if has_key %}loadOrgs();{% endif %}
+</script>
+{% endblock %}

@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% block title %}Meraki Dashboard — Network Toolkit{% endblock %}
+{% block page_title %}Meraki Dashboard Tools{% endblock %}
+
+{% block top_actions %}
+<span class="badge {% if has_api_key %}badge-success{% else %}badge-error{% endif %}">
+    {{ key_count }} API key{{ 's' if key_count != 1 else '' }}
+</span>
+{% endblock %}
+
+{% block extra_css %}
+.device-card {
+    background: var(--bg-mid); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 12px;
+    transition: border-color 0.15s;
+}
+.device-card:hover { border-color: var(--accent-dim); }
+.device-card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.device-card-name { font-size: 14px; font-weight: 600; }
+.device-card-serial { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.info-item { display: flex; flex-direction: column; gap: 2px; }
+.info-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+.info-value { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-primary); word-break: break-all; }
+.info-value.online { color: var(--success); }
+.info-value.offline { color: var(--error); }
+.info-value.alerting { color: var(--warning); }
+.neighbor-row { display: grid; grid-template-columns: 80px 1fr 1fr 120px; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.neighbor-row:last-child { border-bottom: none; }
+.section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent-dim); margin: 12px 0 8px; }
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    {% if not has_api_key %}
+    <div class="card" style="border-color: var(--error); margin-bottom: 24px;">
+        <p style="color: var(--error);">⚠ No Meraki API key configured. <a href="/settings">Go to Settings</a></p>
+    </div>
+    {% endif %}
+
+    <div class="card mb-16">
+        <div class="card-header">
+            <div class="card-title">Organization & Devices</div>
+            <button class="btn btn-sm btn-primary" onclick="loadOrgs()">Load Organizations</button>
+        </div>
+        <div class="flex gap-12 items-center">
+            <select id="org-select" style="flex: 1;" onchange="loadDevices()">
+                <option value="">Select organization...</option>
+            </select>
+            <span id="device-count" class="text-dim text-sm mono"></span>
+        </div>
+    </div>
+
+    <div class="card mb-16">
+        <div class="card-header"><div class="card-title">Actions</div></div>
+        <div class="flex gap-8" style="flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="runAction('status')">Device Status</button>
+            <button class="btn btn-secondary" onclick="runAction('lldp_cdp')">LLDP/CDP Neighbors</button>
+            <button class="btn btn-secondary" onclick="runAction('location')">Location</button>
+            <button class="btn btn-secondary" onclick="runAction('imei')">IMEI Lookup</button>
+            <button class="btn btn-secondary" onclick="runAction('clients')">Clients (24h)</button>
+            <button class="btn btn-secondary" onclick="runAction('full_info')">Full Info</button>
+        </div>
+        <div class="mt-8 flex gap-8">
+            <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
+            <button class="btn btn-sm btn-secondary" onclick="selectNone()">Deselect All</button>
+            <button class="btn btn-sm btn-secondary" onclick="exportCSV()" id="export-btn" disabled>Export CSV</button>
+        </div>
+    </div>
+
+    <div class="card mb-16" id="device-list-card" style="display: none;">
+        <div class="card-header">
+            <div class="card-title">Devices <span id="selected-count" class="text-dim"></span></div>
+            <input type="text" id="device-filter" placeholder="Filter devices..." style="width: 240px;" oninput="filterDevices()">
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+            <table class="data-table">
+                <thead><tr>
+                    <th style="width: 30px;"><input type="checkbox" id="check-all" onchange="toggleAll()"></th>
+                    <th>Name</th><th>Serial</th><th>Model</th><th>Type</th>
+                </tr></thead>
+                <tbody id="device-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card" id="results-card" style="display: none;">
+        <div class="card-header">
+            <div class="card-title" id="results-title">Results</div>
+            <span id="results-count" class="badge badge-info"></span>
+        </div>
+        <div id="results-area" style="max-height: 600px; overflow-y: auto;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allDevices = [], lastAction = '', lastResults = [];
+
+async function loadOrgs() {
+    const sel = document.getElementById('org-select');
+    sel.innerHTML = '<option value="">Loading...</option>';
+    try {
+        const orgs = await API.get('/meraki/api/organizations');
+        sel.innerHTML = '<option value="">Select organization...</option>' +
+            orgs.map(o => `<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+    } catch(e) { sel.innerHTML = '<option value="">Error loading orgs</option>'; }
+}
+async function loadDevices() {
+    const orgId = document.getElementById('org-select').value;
+    if (!orgId) return;
+    document.getElementById('device-count').textContent = 'Loading...';
+    try {
+        allDevices = await API.get(`/meraki/api/devices/${orgId}`);
+        renderDevices(allDevices);
+        document.getElementById('device-count').textContent = `${allDevices.length} devices`;
+        document.getElementById('device-list-card').style.display = '';
+    } catch(e) { document.getElementById('device-count').textContent = 'Error'; }
+}
+function renderDevices(devices) {
+    document.getElementById('device-tbody').innerHTML = devices.map(d => `<tr>
+        <td><input type="checkbox" class="dev-check" value="${d.serial}"></td>
+        <td>${escapeHtml(d.name || '—')}</td><td>${d.serial}</td>
+        <td style="color:var(--text-dim)">${d.model||'—'}</td>
+        <td><span class="badge badge-info">${d.productType||'—'}</span></td>
+    </tr>`).join('');
+    updateSelectedCount();
+}
+function filterDevices() {
+    const q = document.getElementById('device-filter').value.toLowerCase();
+    renderDevices(allDevices.filter(d =>
+        (d.name||'').toLowerCase().includes(q) || d.serial.toLowerCase().includes(q) || (d.model||'').toLowerCase().includes(q)));
+}
+function getSelectedSerials() { return [...document.querySelectorAll('.dev-check:checked')].map(c => c.value); }
+function selectAll() { document.querySelectorAll('.dev-check').forEach(c => c.checked = true); updateSelectedCount(); }
+function selectNone() { document.querySelectorAll('.dev-check').forEach(c => c.checked = false); updateSelectedCount(); }
+function toggleAll() { const v = document.getElementById('check-all').checked; document.querySelectorAll('.dev-check').forEach(c => c.checked = v); updateSelectedCount(); }
+function updateSelectedCount() { const n = getSelectedSerials().length; document.getElementById('selected-count').textContent = n ? `(${n} selected)` : ''; }
+document.addEventListener('change', e => { if (e.target.classList.contains('dev-check')) updateSelectedCount(); });
+
+async function runAction(action) {
+    const serials = getSelectedSerials(), orgId = document.getElementById('org-select').value;
+    if (!serials.length) return alert('Select at least one device');
+    if (!orgId) return alert('Select an organization first');
+    lastAction = action;
+    const area = document.getElementById('results-area');
+    area.innerHTML = '<p class="pulse" style="color:var(--accent);padding:20px">Querying ' + serials.length + ' device(s)...</p>';
+    document.getElementById('results-card').style.display = '';
+    const titles = { status:'Device Status', lldp_cdp:'LLDP/CDP Neighbors', location:'Device Locations',
+                     imei:'IMEI Information', clients:'Connected Clients (24h)', full_info:'Full Device Info' };
+    document.getElementById('results-title').textContent = titles[action] || 'Results';
+    try {
+        lastResults = await API.post('/meraki/api/action', { action, serials, org_id: orgId });
+        document.getElementById('results-count').textContent = `${lastResults.length} device(s)`;
+        document.getElementById('export-btn').disabled = false;
+        renderResults(action, lastResults);
+    } catch(e) { area.innerHTML = `<p style="color:var(--error);padding:20px">Error: ${e.message}</p>`; }
+}
+
+/* ─── Helpers ─────────────────────────────────── */
+function v(x) { return x || '—'; }
+function esc(x) { return escapeHtml(String(x || '—')); }
+function statusBadge(s) {
+    const lo = (s||'').toLowerCase();
+    const cls = lo==='online' ? 'badge-success' : lo==='alerting' ? 'badge-warning' : 'badge-error';
+    return `<span class="badge ${cls}">${esc(s)}</span>`;
+}
+function infoItem(label, value, cls='') {
+    return `<div class="info-item"><span class="info-label">${label}</span><span class="info-value ${cls}">${esc(value)}</span></div>`;
+}
+function timeAgo(iso) {
+    if (!iso) return '—';
+    const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ' + (mins%60) + 'm ago';
+    return Math.floor(hrs/24) + 'd ago';
+}
+function neighborRows(ports) {
+    const keys = Object.keys(ports || {});
+    if (!keys.length) return '<span class="text-dim text-sm">No neighbors</span>';
+    let html = `<div class="neighbor-row" style="color:var(--text-dim);font-weight:600;font-size:11px">
+        <div>PORT</div><div>NEIGHBOR</div><div>PLATFORM</div><div>REMOTE PORT</div></div>`;
+    keys.forEach(port => {
+        const n = ports[port], proto = n.lldp ? 'lldp' : (n.cdp ? 'cdp' : null);
+        if (!proto) return;
+        const info = n[proto];
+        const name = proto==='lldp' ? (info.systemName||'') : (info.deviceId||'');
+        const plat = proto==='lldp' ? (info.systemDescription||'').split(' Cloud')[0] : (info.platform||'');
+        const rp = info.portId || info.portDescription || '';
+        html += `<div class="neighbor-row">
+            <div class="mono" style="color:var(--accent)">${port}</div>
+            <div style="font-weight:500">${esc(name)}</div>
+            <div style="color:var(--text-dim)">${esc(plat)}</div>
+            <div class="mono">${esc(rp)}</div></div>`;
+    });
+    return html;
+}
+
+/* ─── Renderers ───────────────────────────────── */
+function renderResults(action, results) {
+    const area = document.getElementById('results-area');
+    const fn = { status:renderStatus, lldp_cdp:renderLldpCdp, location:renderLocation,
+                 imei:renderImei, clients:renderClients, full_info:renderFullInfo }[action];
+    area.innerHTML = fn ? fn(results) : '<pre style="font-size:12px;color:var(--text-secondary)">' + JSON.stringify(results,null,2) + '</pre>';
+}
+
+function renderStatus(results) {
+    return `<table class="data-table"><thead><tr>
+        <th>Name</th><th>Serial</th><th>Status</th><th>Model</th><th>Public IP</th><th>LAN IP</th><th>Last Seen</th>
+    </tr></thead><tbody>${results.map(r => {
+        const d = r.data;
+        if (d.error) return `<tr><td colspan="7" style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</td></tr>`;
+        return `<tr>
+            <td style="font-weight:500">${esc(d.name)}</td>
+            <td class="mono" style="color:var(--text-dim)">${r.serial}</td>
+            <td>${statusBadge(d.status)}</td>
+            <td>${esc(d.model)}</td>
+            <td class="mono">${esc(d.publicIp)}</td>
+            <td class="mono">${esc(d.lanIp)}</td>
+            <td style="color:var(--text-dim)">${timeAgo(d.lastReportedAt)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function renderLldpCdp(results) {
+    return results.map(r => {
+        const d = r.data;
+        if (d.error) return `<div class="device-card"><span style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</span></div>`;
+        return `<div class="device-card">
+            <div class="device-card-header">
+                <span class="device-card-serial">${r.serial}</span>
+                <span class="badge badge-info">${Object.keys(d.ports||{}).length} port(s)</span>
+            </div>${neighborRows(d.ports)}</div>`;
+    }).join('');
+}
+
+function renderLocation(results) {
+    return `<table class="data-table"><thead><tr>
+        <th>Name</th><th>Serial</th><th>Address</th><th>Lat</th><th>Lng</th>
+    </tr></thead><tbody>${results.map(r => {
+        const d = r.data;
+        if (d.error) return `<tr><td colspan="5" style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</td></tr>`;
+        return `<tr><td style="font-weight:500">${esc(d.name)}</td>
+            <td class="mono" style="color:var(--text-dim)">${r.serial}</td>
+            <td>${esc((d.address||'').replace(/\n/g,', '))}</td>
+            <td class="mono">${d.latitude||'—'}</td><td class="mono">${d.longitude||'—'}</td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function renderImei(results) {
+    return `<table class="data-table"><thead><tr>
+        <th>Name</th><th>Serial</th><th>Model</th><th>IMEI</th><th>Note</th>
+    </tr></thead><tbody>${results.map(r => {
+        const d = r.data;
+        if (d.error) return `<tr><td colspan="5" style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</td></tr>`;
+        const has = d.imei && d.imei !== 'Not available';
+        return `<tr><td style="font-weight:500">${esc(d.name)}</td>
+            <td class="mono" style="color:var(--text-dim)">${r.serial}</td>
+            <td>${esc(d.model)}</td>
+            <td class="mono" style="color:${has?'var(--accent)':'var(--text-dim)'}">${esc(d.imei)}</td>
+            <td style="color:var(--text-dim)">${esc(d.note)}</td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function renderClients(results) {
+    return results.map(r => {
+        const d = r.data;
+        if (d.error) return `<div class="device-card"><span style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</span></div>`;
+        const clients = d.clients || [];
+        return `<div class="device-card">
+            <div class="device-card-header">
+                <span class="device-card-serial">${r.serial}</span>
+                <span class="badge badge-info">${clients.length} client(s)</span>
+            </div>
+            ${!clients.length ? '<span class="text-dim text-sm">No clients in last 24h</span>' :
+            `<table class="data-table" style="margin:0"><thead><tr>
+                <th>Description</th><th>MAC</th><th>IP</th><th>VLAN</th><th>Usage</th>
+            </tr></thead><tbody>${clients.slice(0,50).map(c => {
+                const desc = c.description || c.dhcpHostname || '—';
+                const sent = c.usage ? (c.usage.sent/1048576).toFixed(1) : '0';
+                const recv = c.usage ? (c.usage.recv/1048576).toFixed(1) : '0';
+                return `<tr><td style="font-weight:500">${esc(desc)}</td>
+                    <td class="mono" style="color:var(--text-dim)">${esc(c.mac)}</td>
+                    <td class="mono">${esc(c.ip)}</td><td>${c.vlan||'—'}</td>
+                    <td style="color:var(--text-dim)">↑${sent} ↓${recv} MB</td></tr>`;
+            }).join('')}</tbody></table>
+            ${clients.length > 50 ? `<p class="text-dim text-sm mt-8">Showing 50 of ${clients.length}</p>` : ''}`}
+        </div>`;
+    }).join('');
+}
+
+function renderFullInfo(results) {
+    return results.map(r => {
+        const d = r.data;
+        if (d.error) return `<div class="device-card"><span style="color:var(--error)">${esc(r.serial)} — ${esc(d.error)}</span></div>`;
+        const b = d.basic_info||{}, s = d.status||{}, loc = d.location||{};
+
+        return `<div class="device-card">
+            <div class="device-card-header">
+                <div>
+                    <div class="device-card-name">${esc(b.name || s.name)}</div>
+                    <div class="device-card-serial">${r.serial} · ${esc(b.model)} · ${esc(b.productType)}</div>
+                </div>
+                ${statusBadge(s.status)}
+            </div>
+
+            <div class="section-label">Identity</div>
+            <div class="info-grid">
+                ${infoItem('Hostname', b.name)}
+                ${infoItem('Serial', b.serial)}
+                ${infoItem('Model', b.model)}
+                ${infoItem('MAC', b.mac)}
+                ${infoItem('Product Type', b.productType)}
+                ${infoItem('Firmware', b.firmware)}
+                ${b.imei && b.imei !== 'N/A' ? infoItem('IMEI', b.imei) : ''}
+                ${infoItem('Network ID', b.networkId)}
+                ${b.tags && b.tags.length ? infoItem('Tags', b.tags.join(', ')) : ''}
+            </div>
+
+            <div class="section-label">Network</div>
+            <div class="info-grid">
+                ${infoItem('Status', s.status, (s.status||'').toLowerCase())}
+                ${infoItem('LAN IP', b.lanIp || s.lanIp)}
+                ${infoItem('Public IP', s.publicIp)}
+                ${infoItem('Gateway', s.gateway)}
+                ${infoItem('Primary DNS', s.primaryDns)}
+                ${infoItem('Secondary DNS', s.secondaryDns)}
+                ${infoItem('IP Type', s.ipType)}
+                ${infoItem('Last Reported', timeAgo(s.lastReportedAt))}
+                ${infoItem('Config Updated', timeAgo(s.configurationUpdatedAt))}
+            </div>
+
+            ${loc && !loc.error ? `<div class="section-label">Location</div>
+            <div class="info-grid">
+                ${infoItem('Address', (loc.address||'').replace(/\n/g, ', '))}
+                ${infoItem('Latitude', loc.latitude)}
+                ${infoItem('Longitude', loc.longitude)}
+            </div>` : ''}
+
+            <div class="section-label">Neighbors</div>
+            ${neighborRows((d.lldp_cdp_neighbors||{}).ports)}
+        </div>`;
+    }).join('');
+}
+
+async function exportCSV() {
+    if (!lastResults.length) return;
+    try {
+        const resp = await fetch('/meraki/api/export-csv', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ action: lastAction, results: lastResults }),
+        });
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `meraki_${lastAction}_${Date.now()}.csv`;
+        a.click();
+    } catch(e) { alert('Export failed: ' + e.message); }
+}
+
+{% if has_api_key %}loadOrgs();{% endif %}
+</script>
+{% endblock %}

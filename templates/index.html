@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Network Toolkit — Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <div style="margin-bottom: 32px;">
+        <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 8px;">
+            Network Operations Toolkit
+        </h2>
+        <p style="color: var(--text-secondary); font-size: 14px;">
+            HAE / HII Infrastructure — Unified Cisco & Meraki Management Platform
+        </p>
+    </div>
+
+    <div class="module-grid">
+        {% for mod in modules %}
+        <a href="{{ mod.url }}" class="module-card" style="--module-color: {{ mod.color }}; text-decoration: none; color: inherit;">
+            <div class="module-icon" id="mod-icon-{{ mod.id }}" style="background: {{ mod.color }}20; color: {{ mod.color }};">
+            </div>
+            <h3>{{ mod.name }}</h3>
+            <p>{{ mod.description }}</p>
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- Quick Status -->
+    <div class="card mt-24">
+        <div class="card-header">
+            <div class="card-title">Credential Status</div>
+            <button class="btn btn-sm btn-secondary" onclick="window.location='/settings'">Configure</button>
+        </div>
+        <div id="cred-status" class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Meraki API Keys</div>
+                <div class="stat-value" id="meraki-key-count" style="color: var(--text-dim);">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Cisco SSH</div>
+                <div class="stat-value" id="cisco-status" style="color: var(--text-dim);">—</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    async function loadCredStatus() {
+        try {
+            const data = await API.get('/api/credentials');
+            const mk = document.getElementById('meraki-key-count');
+            const cs = document.getElementById('cisco-status');
+
+            mk.textContent = data.meraki_keys || '0';
+            mk.style.color = data.meraki_keys > 0 ? 'var(--accent)' : 'var(--error)';
+
+            cs.textContent = data.cisco_user ? '✓' : '✗';
+            cs.style.color = data.cisco_user ? 'var(--success)' : 'var(--error)';
+        } catch (e) {
+            console.error(e);
+        }
+    }
+    loadCredStatus();
+
+    // Populate module card icons
+    const modIcons = {
+        {% for mod in modules %}'{{ mod.id }}': '{{ mod.icon }}',{% endfor %}
+    };
+    Object.entries(modIcons).forEach(([id, icon]) => {
+        const el = document.getElementById('mod-icon-' + id);
+        if (el && ICONS[icon]) el.innerHTML = ICONS[icon];
+    });
+</script>
+{% endblock %}

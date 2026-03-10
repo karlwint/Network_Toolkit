@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block title %}Credential Audit — Network Toolkit{% endblock %}
+{% block page_title %}Credential Audit & Remediation{% endblock %}
+
+{% block top_actions %}
+<span class="badge {% if has_creds %}badge-success{% else %}badge-error{% endif %}">
+    {{ 'Credentials Ready' if has_creds else 'Not Configured' }}
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    {% if not has_creds %}
+    <div class="card" style="border-color: var(--error); margin-bottom: 24px;">
+        <p style="color: var(--error);">⚠ Cisco credentials not configured. <a href="/settings">Go to Settings</a></p>
+    </div>
+    {% endif %}
+
+    <div class="grid-2">
+        <!-- Left: Audit Config -->
+        <div>
+            <div class="card mb-16">
+                <div class="card-title mb-16">Audit Configuration</div>
+                <div class="form-group">
+                    <label class="form-label">Network Ranges / IPs (one per line)</label>
+                    <textarea id="audit-input" placeholder="10.0.0.0/24&#10;172.16.1.0/24&#10;192.168.1.100"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Protocols to Test</label>
+                    <div class="flex gap-16" style="flex-wrap: wrap;">
+                        <label style="font-size: 13px; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" class="proto-check" value="ssh" checked> SSH
+                        </label>
+                        <label style="font-size: 13px; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" class="proto-check" value="http"> HTTP
+                        </label>
+                        <label style="font-size: 13px; color: var(--text-secondary); cursor: pointer;">
+                            <input type="checkbox" class="proto-check" value="https"> HTTPS
+                        </label>
+                    </div>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label class="form-label">TCP Timeout (s)</label>
+                        <input type="number" id="tcp-timeout" value="0.3" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Proto Timeout (s)</label>
+                        <input type="number" id="proto-timeout" value="10">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Scan Threads</label>
+                        <input type="number" id="max-threads" value="50">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Device Type</label>
+                    <select id="device-type">
+                        <option value="cisco_ios">Cisco IOS</option>
+                        <option value="cisco_xe">Cisco IOS-XE</option>
+                        <option value="cisco_nxos">Cisco NX-OS</option>
+                    </select>
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-primary" onclick="startAudit()" id="audit-btn">Start Audit</button>
+                    <button class="btn btn-danger" onclick="cancelAudit()" id="cancel-btn" disabled>Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Results -->
+        <div>
+            <div class="card mb-16">
+                <div class="flex justify-between items-center mb-16">
+                    <div class="card-title">Progress</div>
+                    <span id="job-status" class="badge badge-info">IDLE</span>
+                </div>
+                <div id="phase-label" class="text-dim text-sm mb-16" style="display: none;"></div>
+                <div class="progress-bar mb-16">
+                    <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Hosts w/ Open Ports</div>
+                        <div class="stat-value" id="stat-open" style="font-size: 22px;">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">SSH Vulnerable</div>
+                        <div class="stat-value" id="stat-ssh" style="font-size: 22px; color: var(--error);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">HTTP/S Vulnerable</div>
+                        <div class="stat-value" id="stat-http" style="font-size: 22px; color: var(--warning);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Vulnerable</div>
+                        <div class="stat-value" id="stat-total" style="font-size: 22px; color: var(--error);">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vulnerable Hosts -->
+            <div class="card mb-16">
+                <div class="card-header">
+                    <div class="card-title">Vulnerable Hosts</div>
+                    <button class="btn btn-sm btn-secondary" onclick="exportAudit()">Export CSV</button>
+                </div>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead><tr>
+                            <th>IP</th><th>Hostname</th><th>Model</th><th>Protocols</th><th>Ports</th>
+                        </tr></thead>
+                        <tbody id="vuln-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Console -->
+            <div class="card">
+                <div class="card-title mb-16">Audit Log</div>
+                <div class="console" id="console"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentJobId = null;
+    let auditResults = [];
+
+    async function startAudit() {
+        const input = document.getElementById('audit-input').value.trim().split('\n').filter(Boolean);
+        if (!input.length) return alert('Enter network ranges or IPs');
+
+        const protocols = [...document.querySelectorAll('.proto-check:checked')].map(c => c.value);
+        if (!protocols.length) return alert('Select at least one protocol');
+
+        document.getElementById('audit-btn').disabled = true;
+        document.getElementById('cancel-btn').disabled = false;
+        auditResults = [];
+        document.getElementById('vuln-tbody').innerHTML = '';
+        document.getElementById('console').innerHTML = '';
+
+        try {
+            const resp = await API.post('/audit/api/scan', {
+                networks: input, protocols,
+                tcp_timeout: +document.getElementById('tcp-timeout').value,
+                proto_timeout: +document.getElementById('proto-timeout').value,
+                max_threads: +document.getElementById('max-threads').value,
+                device_type: document.getElementById('device-type').value,
+            });
+            currentJobId = resp.job_id;
+            pollJob(`/audit/api/job/${currentJobId}`, updateAuditStatus);
+        } catch (e) {
+            appendLog(`[ERROR] ${e.message}`, 'error');
+            resetButtons();
+        }
+    }
+
+    function updateAuditStatus(data) {
+        const pct = data.total > 0 ? (data.progress / data.total * 100) : 0;
+        document.getElementById('progress-fill').style.width = pct + '%';
+
+        const statusEl = document.getElementById('job-status');
+        statusEl.textContent = data.status.toUpperCase();
+        statusEl.className = 'badge ' + ({
+            running: 'badge-warning', complete: 'badge-success',
+            cancelled: 'badge-error', error: 'badge-error',
+        }[data.status] || 'badge-info');
+
+        // Phase label
+        const phaseEl = document.getElementById('phase-label');
+        if (data.phase) {
+            phaseEl.style.display = '';
+            phaseEl.textContent = data.phase === 'port_scan' ? 'Phase 1: Port Scanning...' :
+                                  data.phase === 'protocol_check' ? 'Phase 2: Protocol Verification...' : data.phase;
+        }
+
+        // Stats
+        if (data.stats) {
+            document.getElementById('stat-open').textContent = data.stats.open_ports;
+            document.getElementById('stat-ssh').textContent = data.stats.ssh_vuln;
+            document.getElementById('stat-http').textContent = data.stats.http_vuln;
+            document.getElementById('stat-total').textContent = data.stats.total_vuln;
+        }
+
+        // Results table — only vulnerable hosts
+        if (data.results) {
+            auditResults = data.results;
+            const vuln = data.results.filter(r => r.vulnerable_protocols && r.vulnerable_protocols.length > 0);
+            document.getElementById('vuln-tbody').innerHTML = vuln.map(r => `<tr>
+                <td>${r.ip}</td>
+                <td>${r.ssh_hostname || '—'}</td>
+                <td style="color: var(--text-dim);">${r.ssh_model || '—'}</td>
+                <td>${r.vulnerable_protocols.map(p =>
+                    `<span class="badge badge-error">${p}</span>`).join(' ')}</td>
+                <td style="color: var(--text-dim);">${(r.open_ports || []).join(', ')}</td>
+            </tr>`).join('');
+        }
+
+        // Console
+        if (data.log) {
+            const con = document.getElementById('console');
+            con.innerHTML = data.log.map(l => {
+                let cls = 'log-info';
+                if (l.includes('[VULNERABLE]')) cls = 'log-error';
+                else if (l.includes('[CLEAN]')) cls = 'log-success';
+                else if (l.includes('[ERROR]')) cls = 'log-error';
+                else if (l.includes('[PHASE')) cls = 'log-warning';
+                return `<div class="${cls}">${escapeHtml(l)}</div>`;
+            }).join('');
+            con.scrollTop = con.scrollHeight;
+        }
+
+        if (['complete', 'cancelled', 'error'].includes(data.status)) resetButtons();
+    }
+
+    async function cancelAudit() {
+        if (currentJobId) await API.post(`/audit/api/job/${currentJobId}/cancel`, {});
+    }
+
+    function exportAudit() {
+        if (!auditResults.length) return;
+        const rows = [['IP', 'Hostname', 'Model', 'Vulnerable Protocols', 'Open Ports',
+                        'SSH Accessible', 'HTTP Accessible', 'HTTPS Accessible']];
+        auditResults.forEach(r => rows.push([
+            r.ip, r.ssh_hostname || '', r.ssh_model || '',
+            (r.vulnerable_protocols || []).join('; '),
+            (r.open_ports || []).join('; '),
+            r.ssh_accessible ? 'Yes' : 'No',
+            r.http_accessible ? 'Yes' : 'No',
+            r.https_accessible ? 'Yes' : 'No',
+        ]));
+        const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `credential_audit_${Date.now()}.csv`;
+        a.click();
+    }
+
+    function appendLog(msg, type = 'info') {
+        const con = document.getElementById('console');
+        const cls = type === 'error' ? 'log-error' : 'log-info';
+        con.innerHTML += `<div class="${cls}">${escapeHtml(msg)}</div>`;
+        con.scrollTop = con.scrollHeight;
+    }
+
+    function resetButtons() {
+        document.getElementById('audit-btn').disabled = false;
+        document.getElementById('cancel-btn').disabled = true;
+    }
+</script>
+{% endblock %}

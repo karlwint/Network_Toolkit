@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+{% block title %}Cisco CLI Tools — Network Toolkit{% endblock %}
+{% block page_title %}Cisco CLI Tools{% endblock %}
+
+{% block top_actions %}
+<span class="badge {% if has_creds %}badge-success{% else %}badge-error{% endif %}">
+    SSH {{ 'Ready' if has_creds else 'Not Configured' }}
+</span>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    {% if not has_creds %}
+    <div class="card" style="border-color: var(--error); margin-bottom: 24px;">
+        <p style="color: var(--error);">⚠ Cisco SSH credentials not configured. <a href="/settings">Go to Settings</a></p>
+    </div>
+    {% endif %}
+
+    <div class="grid-2">
+        <!-- Left: Scan Configuration -->
+        <div>
+            <div class="card mb-16">
+                <div class="card-title mb-16">Scan Configuration</div>
+                <div class="form-group">
+                    <label class="form-label">Mode</label>
+                    <select id="scan-mode" onchange="toggleMode()">
+                        <option value="network">Network Range Scan</option>
+                        <option value="direct">Direct IP Verification</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" id="input-label">Network Ranges (one per line)</label>
+                    <textarea id="scan-input" placeholder="10.0.0.0/24&#10;172.16.1.0/24&#10;192.168.1.0/24"></textarea>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label class="form-label">SSH Port</label>
+                        <input type="number" id="ssh-port" value="22">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">TCP Timeout</label>
+                        <input type="number" id="tcp-timeout" value="1" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Threads</label>
+                        <input type="number" id="max-threads" value="50">
+                    </div>
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-primary" onclick="startScan()" id="scan-btn">Start Scan</button>
+                    <button class="btn btn-danger" onclick="cancelScan()" id="cancel-btn" disabled>Cancel</button>
+                </div>
+            </div>
+
+            <!-- Config Push -->
+            <div class="card">
+                <div class="card-title mb-16">Configuration Push</div>
+                <div class="form-group">
+                    <label class="form-label">Commands (one per line)</label>
+                    <textarea id="config-commands" placeholder="snmp-server community NEW_COMM ro&#10;no snmp-server community OLD_COMM"></textarea>
+                </div>
+                <div class="flex gap-8 items-center">
+                    <button class="btn btn-primary" onclick="pushConfig()" id="push-btn" disabled>
+                        Push Config
+                    </button>
+                    <label style="font-size: 12px; color: var(--text-secondary);">
+                        <input type="checkbox" id="save-config" checked> Write memory after push
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Status & Results -->
+        <div>
+            <div class="card mb-16">
+                <div class="flex justify-between items-center mb-16">
+                    <div class="card-title">Progress</div>
+                    <span id="job-status" class="badge badge-info">IDLE</span>
+                </div>
+                <div class="progress-bar mb-16">
+                    <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Scanned</div>
+                        <div class="stat-value" id="stat-scanned" style="font-size: 22px;">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Accessible</div>
+                        <div class="stat-value" id="stat-accessible" style="font-size: 22px; color: var(--success);">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value" id="stat-failed" style="font-size: 22px; color: var(--error);">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Table -->
+            <div class="card mb-16">
+                <div class="card-header">
+                    <div class="card-title">Results</div>
+                    <button class="btn btn-sm btn-secondary" onclick="exportResults()">Export CSV</button>
+                </div>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table class="data-table">
+                        <thead><tr><th>IP</th><th>Hostname</th><th>Model</th><th>SSH</th><th>Config</th></tr></thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Console -->
+            <div class="card">
+                <div class="card-title mb-16">Console</div>
+                <div class="console" id="console"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentJobId = null;
+    let scanResults = [];
+
+    function toggleMode() {
+        const mode = document.getElementById('scan-mode').value;
+        document.getElementById('input-label').textContent =
+            mode === 'direct' ? 'IP Addresses (one per line)' : 'Network Ranges (one per line)';
+        document.getElementById('scan-input').placeholder =
+            mode === 'direct' ? '10.0.0.1\n10.0.0.2\n172.16.1.50' : '10.0.0.0/24\n172.16.1.0/24';
+    }
+
+    async function startScan() {
+        const mode = document.getElementById('scan-mode').value;
+        const input = document.getElementById('scan-input').value.trim().split('\n').filter(Boolean);
+        if (!input.length) return alert('Enter network ranges or IPs');
+
+        document.getElementById('scan-btn').disabled = true;
+        document.getElementById('cancel-btn').disabled = false;
+        document.getElementById('push-btn').disabled = true;
+        scanResults = [];
+        document.getElementById('results-tbody').innerHTML = '';
+        document.getElementById('console').innerHTML = '';
+
+        const endpoint = mode === 'direct' ? '/cisco/api/verify-direct' : '/cisco/api/scan';
+        const body = mode === 'direct'
+            ? { ips: input }
+            : { networks: input, ssh_port: +document.getElementById('ssh-port').value,
+                tcp_timeout: +document.getElementById('tcp-timeout').value,
+                max_threads: +document.getElementById('max-threads').value };
+
+        try {
+            const resp = await API.post(endpoint, body);
+            currentJobId = resp.job_id;
+            appendLog(`[START] Job ${currentJobId} — ${resp.total || resp.total_ips} targets`);
+            pollJob(`/cisco/api/job/${currentJobId}`, updateJobStatus);
+        } catch (e) {
+            appendLog(`[ERROR] ${e.message}`, 'error');
+            resetButtons();
+        }
+    }
+
+    function updateJobStatus(data) {
+        const pct = data.total > 0 ? (data.progress / data.total * 100) : 0;
+        document.getElementById('progress-fill').style.width = pct + '%';
+
+        const statusEl = document.getElementById('job-status');
+        statusEl.textContent = data.status.toUpperCase();
+        statusEl.className = 'badge ' + ({
+            scanning: 'badge-warning', verifying: 'badge-info',
+            pushing: 'badge-warning', complete: 'badge-success',
+            cancelled: 'badge-error', error: 'badge-error',
+        }[data.status] || 'badge-info');
+
+        // Update results
+        if (data.results) {
+            scanResults = data.results;
+            const accessible = data.results.filter(r => r.ssh_accessible || r.config_pushed);
+            const failed = data.results.filter(r => !r.ssh_accessible && !r.config_pushed);
+            document.getElementById('stat-scanned').textContent = data.results.length;
+            document.getElementById('stat-accessible').textContent = accessible.length;
+            document.getElementById('stat-failed').textContent = failed.length;
+            renderResults(data.results);
+        }
+
+        // Update console
+        if (data.log) {
+            const con = document.getElementById('console');
+            con.innerHTML = data.log.map(l => {
+                let cls = '';
+                if (l.includes('[SSH OK]') || l.includes('[CONFIG OK]') || l.includes('[COMPLETE]')) cls = 'log-success';
+                else if (l.includes('[FAIL]') || l.includes('[ERROR]')) cls = 'log-error';
+                else if (l.includes('[PORT OPEN]') || l.includes('CANCELLED')) cls = 'log-warning';
+                else cls = 'log-info';
+                return `<div class="${cls}">${escapeHtml(l)}</div>`;
+            }).join('');
+            con.scrollTop = con.scrollHeight;
+        }
+
+        if (data.status === 'complete' || data.status === 'cancelled' || data.status === 'error') {
+            resetButtons();
+            if (scanResults.some(r => r.ssh_accessible)) {
+                document.getElementById('push-btn').disabled = false;
+            }
+        }
+    }
+
+    async function pushConfig() {
+        const accessible = scanResults.filter(r => r.ssh_accessible).map(r => r.ip);
+        if (!accessible.length) return alert('No accessible switches');
+        const cmds = document.getElementById('config-commands').value.trim().split('\n').filter(Boolean);
+        if (!cmds.length) return alert('Enter configuration commands');
+
+        const save = document.getElementById('save-config').checked;
+        const msg = `Push ${cmds.length} command(s) to ${accessible.length} switch(es)?\n\n` +
+            cmds.map(c => '  › ' + c).join('\n') +
+            `\n\nWrite memory: ${save ? 'YES' : 'NO'}`;
+        if (!confirm(msg)) return;
+
+        document.getElementById('push-btn').disabled = true;
+        document.getElementById('cancel-btn').disabled = false;
+
+        try {
+            const resp = await API.post('/cisco/api/push-config', {
+                targets: accessible, commands: cmds,
+                save_config: document.getElementById('save-config').checked,
+            });
+            currentJobId = resp.job_id;
+            appendLog(`[PUSH] Pushing ${cmds.length} commands to ${accessible.length} switches`);
+            pollJob(`/cisco/api/job/${currentJobId}`, updateJobStatus);
+        } catch (e) {
+            appendLog(`[ERROR] ${e.message}`, 'error');
+            resetButtons();
+        }
+    }
+
+    async function cancelScan() {
+        if (currentJobId) {
+            await API.post(`/cisco/api/job/${currentJobId}/cancel`, {});
+            appendLog('[CANCELLED] Job cancelled');
+        }
+    }
+
+    function renderResults(results) {
+        document.getElementById('results-tbody').innerHTML = results.map(r => {
+            const sshColor = r.ssh_accessible ? 'var(--success)' : 'var(--error)';
+            const sshText = r.ssh_accessible ? '✓' : (r.error || '✗');
+            const cfgColor = r.config_pushed ? 'var(--success)' : 'var(--text-dim)';
+            const cfgText = r.config_pushed ? '✓' : '—';
+            return `<tr>
+                <td>${r.ip}</td>
+                <td>${r.hostname || '—'}</td>
+                <td style="color: var(--text-dim);">${r.model || '—'}</td>
+                <td style="color: ${sshColor};">${sshText}</td>
+                <td style="color: ${cfgColor};">${cfgText}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function exportResults() {
+        if (!scanResults.length) return;
+        const rows = [['IP', 'Hostname', 'Model', 'SSH', 'Config Pushed', 'Error']];
+        scanResults.forEach(r => rows.push([
+            r.ip, r.hostname || '', r.model || '',
+            r.ssh_accessible ? 'Yes' : 'No',
+            r.config_pushed ? 'Yes' : 'No',
+            r.error || ''
+        ]));
+        const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `cisco_scan_${Date.now()}.csv`;
+        a.click();
+    }
+
+    function appendLog(msg, type = 'info') {
+        const con = document.getElementById('console');
+        const cls = type === 'error' ? 'log-error' : type === 'success' ? 'log-success' : 'log-info';
+        con.innerHTML += `<div class="${cls}">${escapeHtml(msg)}</div>`;
+        con.scrollTop = con.scrollHeight;
+    }
+
+    function resetButtons() {
+        document.getElementById('scan-btn').disabled = false;
+        document.getElementById('cancel-btn').disabled = true;
+    }
+</script>
+{% endblock %}
