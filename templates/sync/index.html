@@ -19,7 +19,7 @@
     <!-- Shared: Org & Network Selection -->
     <div class="card mb-16">
         <div class="card-header">
-            <div class="card-title">Organization & Networks</div>
+            <div class="card-title">Step 1: Select Organization & Networks</div>
             <button class="btn btn-sm btn-primary" onclick="loadOrgs()">Load Organizations</button>
         </div>
         <div class="flex gap-12 items-center mb-16">
@@ -50,15 +50,31 @@
                     <tbody id="net-tbody"></tbody>
                 </table>
             </div>
-            <p class="text-dim text-sm mt-8">Leave all unchecked to sync ALL eligible networks.</p>
+            <div class="mt-16">
+                <button class="btn btn-primary" onclick="loadNetworkConfigs()" id="load-configs-btn">
+                    Load Current Configs
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Tab Selector -->
-    <div class="flex gap-8 mb-16">
-        <button class="btn btn-primary" id="tab-radius" onclick="showTab('radius')">RADIUS Sync</button>
-        <button class="btn btn-secondary" id="tab-dns" onclick="showTab('dns')">DNS Sync</button>
+    <!-- Step 2: Review Current Configs -->
+    <div id="config-review-panel" style="display: none;">
+        <div class="card mb-16">
+            <div class="card-title mb-16">Step 2: Review Current Configurations</div>
+            <div id="config-summary"></div>
+        </div>
     </div>
+
+    <!-- Step 3: Modify & Sync -->
+    <div id="sync-panel" style="display: none;">
+        <div class="card mb-16">
+            <div class="card-title mb-16">Step 3: Choose Sync Type</div>
+            <div class="flex gap-8">
+                <button class="btn btn-primary" id="tab-radius" onclick="showTab('radius')">RADIUS Sync</button>
+                <button class="btn btn-secondary" id="tab-dhcp" onclick="showTab('dhcp')">DHCP Sync</button>
+            </div>
+        </div>
 
     <!-- ═══ RADIUS Sync Panel ═══ -->
     <div id="panel-radius">
@@ -115,26 +131,30 @@
         </div>
     </div>
 
-    <!-- ═══ DNS Sync Panel ═══ -->
-    <div id="panel-dns" style="display: none;">
+    <!-- ═══ DHCP Sync Panel ═══ -->
+    <div id="panel-dhcp" style="display: none;">
         <div class="grid-2">
             <div>
                 <div class="card mb-16">
-                    <div class="card-title mb-16" style="color: var(--info);">⟳ DNS Server Sync</div>
+                    <div class="card-title mb-16" style="color: var(--success);">⟳ DHCP Configuration Sync</div>
                     <p class="text-dim text-sm mb-16">
-                        Syncs DNS nameservers on specified VLANs across selected MX networks.
+                        Update DHCP DNS servers and lease times across selected VLANs.
                     </p>
+                    
                     <div class="form-group">
-                        <label class="form-label">Target VLANs (comma separated)</label>
-                        <input type="text" id="dns-vlans" placeholder="300, 400">
+                        <label class="form-label">DHCP DNS Servers (applies to all VLANs, one per line)</label>
+                        <textarea id="dhcp-dns-servers" style="min-height: 80px;" placeholder="172.26.115.62&#10;8.8.8.8&#10;8.8.4.4"></textarea>
+                        <small class="text-dim">Leave blank to skip DNS update</small>
                     </div>
+                    
                     <div class="form-group">
-                        <label class="form-label">DNS Servers (one per line)</label>
-                        <textarea id="dns-servers" style="min-height: 120px;" placeholder="172.26.115.62&#10;8.8.8.8&#10;8.8.4.4"></textarea>
+                        <label class="form-label">Target VLANs & Lease Times</label>
+                        <div id="dhcp-vlan-config" class="vlan-config-list"></div>
                     </div>
+                    
                     <div class="flex gap-8">
-                        <button class="btn btn-primary" onclick="startDnsSync()" id="dns-btn">Start DNS Sync</button>
-                        <button class="btn btn-danger" onclick="cancelSync('dns')" id="dns-cancel" disabled>Cancel</button>
+                        <button class="btn btn-primary" onclick="startDhcpSync()" id="dhcp-btn">Start DHCP Sync</button>
+                        <button class="btn btn-danger" onclick="cancelSync('dhcp')" id="dhcp-cancel" disabled>Cancel</button>
                     </div>
                 </div>
             </div>
@@ -142,38 +162,76 @@
                 <div class="card mb-16">
                     <div class="flex justify-between items-center mb-16">
                         <div class="card-title">Sync Progress</div>
-                        <span id="dns-status" class="badge badge-info">IDLE</span>
+                        <span id="dhcp-status" class="badge badge-info">IDLE</span>
                     </div>
                     <div class="progress-bar mb-16">
-                        <div class="progress-bar-fill" id="dns-progress" style="width: 0%;"></div>
+                        <div class="progress-bar-fill" id="dhcp-progress" style="width: 0%;"></div>
                     </div>
                     <div class="stats-grid">
                         <div class="stat-card"><div class="stat-label">Updated</div>
-                            <div class="stat-value" id="dns-updated" style="font-size: 22px; color: var(--success);">0</div></div>
+                            <div class="stat-value" id="dhcp-updated" style="font-size: 22px; color: var(--success);">0</div></div>
                         <div class="stat-card"><div class="stat-label">Skipped</div>
-                            <div class="stat-value" id="dns-skipped" style="font-size: 22px; color: var(--warning);">0</div></div>
+                            <div class="stat-value" id="dhcp-skipped" style="font-size: 22px; color: var(--warning);">0</div></div>
                         <div class="stat-card"><div class="stat-label">Errors</div>
-                            <div class="stat-value" id="dns-err" style="font-size: 22px; color: var(--error);">0</div></div>
+                            <div class="stat-value" id="dhcp-err" style="font-size: 22px; color: var(--error);">0</div></div>
                     </div>
                 </div>
                 <div class="card"><div class="card-title mb-16">Console</div>
-                    <div class="console" id="dns-console"></div></div>
+                    <div class="console" id="dhcp-console"></div></div>
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
+{% block styles %}
+<style>
+.vlan-checkbox-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--surface);
+}
+.vlan-config-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--surface);
+}
+.vlan-config-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    background: var(--background);
+}
+.vlan-config-item input[type="text"] {
+    width: 150px;
+}
+.config-network-item:hover .config-header {
+    background: var(--surface-hover);
+}
+</style>
+{% endblock %}
+
 {% block scripts %}
 <script>
     let allNetworks = [];
-    let radiusJobId = null, dnsJobId = null;
+    let networkConfigs = [];
+    let availableVlans = [];
+    let radiusJobId = null, dhcpJobId = null;
 
     function showTab(tab) {
         document.getElementById('panel-radius').style.display = tab === 'radius' ? '' : 'none';
-        document.getElementById('panel-dns').style.display = tab === 'dns' ? '' : 'none';
+        document.getElementById('panel-dhcp').style.display = tab === 'dhcp' ? '' : 'none';
         document.getElementById('tab-radius').className = tab === 'radius' ? 'btn btn-primary' : 'btn btn-secondary';
-        document.getElementById('tab-dns').className = tab === 'dns' ? 'btn btn-primary' : 'btn btn-secondary';
+        document.getElementById('tab-dhcp').className = tab === 'dhcp' ? 'btn btn-primary' : 'btn btn-secondary';
     }
 
     // ─── Org & Network Selection ─────────────────────
@@ -260,6 +318,141 @@
     }
     document.addEventListener('change', e => { if (e.target.classList.contains('net-check')) updateNetSelected(); });
 
+    // ─── Load Network Configs ────────────────────────
+    async function loadNetworkConfigs() {
+        const orgId = document.getElementById('org-select').value;
+        const networkIds = getSelectedNetworkIds();
+        
+        if (!orgId) return alert('Select an organization first');
+        if (!networkIds.length) return alert('Select at least one network');
+        
+        document.getElementById('load-configs-btn').disabled = true;
+        document.getElementById('load-configs-btn').textContent = 'Loading...';
+        
+        try {
+            const resp = await fetch('/sync/api/network-configs', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ org_id: orgId, network_ids: networkIds })
+            });
+            const data = await resp.json();
+            
+            if (!resp.ok) {
+                alert('Error: ' + (data.error || resp.statusText));
+                return;
+            }
+            
+            networkConfigs = data.configs;
+            availableVlans = data.availableVlans;
+            
+            displayNetworkConfigs();
+            populateVlanCheckboxes();
+            
+            document.getElementById('config-review-panel').style.display = '';
+            document.getElementById('sync-panel').style.display = '';
+            
+        } catch (e) {
+            alert('Error loading configs: ' + e.message);
+        } finally {
+            document.getElementById('load-configs-btn').disabled = false;
+            document.getElementById('load-configs-btn').textContent = 'Load Current Configs';
+        }
+    }
+
+    function displayNetworkConfigs() {
+        const summary = document.getElementById('config-summary');
+        let html = '';
+        
+        networkConfigs.forEach(config => {
+            const hasRadius = Object.keys(config.radius).length > 0;
+            const hasVlans = config.vlans.length > 0;
+            
+            html += `
+                <div class="config-network-item" style="margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;">
+                    <div class="config-header" style="padding: 12px; background: var(--surface-elevated); cursor: pointer; display: flex; justify-content: space-between; align-items: center;"
+                         onclick="toggleConfigDetails('${config.id}')">
+                        <div>
+                            <strong>${escapeHtml(config.name)}</strong>
+                            <span class="text-dim text-sm ml-8">${config.productTypes.join(', ')}</span>
+                        </div>
+                        <span id="config-toggle-${config.id}">▼</span>
+                    </div>
+                    <div id="config-details-${config.id}" class="config-details" style="display: none; padding: 16px; background: var(--background);">
+                        ${hasRadius ? `
+                            <div class="mb-16">
+                                <div class="text-sm font-bold mb-8">RADIUS Config:</div>
+                                ${Object.entries(config.radius).map(([ssid, cfg]) => `
+                                    <div class="mb-8">
+                                        <div class="text-sm text-dim">${ssid}</div>
+                                        <div class="text-xs mono ml-8">Auth: ${cfg.authServers.map(s => s.host).join(', ') || 'None'}</div>
+                                        <div class="text-xs mono ml-8">Acct: ${cfg.acctServers.map(s => s.host).join(', ') || 'None'}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        ${hasVlans ? `
+                            <div>
+                                <div class="text-sm font-bold mb-8">VLAN Config:</div>
+                                <table class="data-table">
+                                    <thead><tr><th>VLAN</th><th>Name</th><th>DNS</th><th>DHCP DNS</th></tr></thead>
+                                    <tbody>
+                                        ${config.vlans.map(v => `
+                                            <tr>
+                                                <td>${v.id}</td>
+                                                <td class="text-dim">${escapeHtml(v.name)}</td>
+                                                <td class="mono text-xs">${v.dnsNameservers || '-'}</td>
+                                                <td class="mono text-xs">${v.dhcpDnsServers || '-'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : '<div class="text-dim">No VLANs configured</div>'}
+                    </div>
+                </div>
+            `;
+        });
+        
+        summary.innerHTML = html || '<p class="text-dim">No configs loaded</p>';
+    }
+
+    function toggleConfigDetails(netId) {
+        const details = document.getElementById(`config-details-${netId}`);
+        const toggle = document.getElementById(`config-toggle-${netId}`);
+        if (details.style.display === 'none') {
+            details.style.display = 'block';
+            toggle.textContent = '▲';
+        } else {
+            details.style.display = 'none';
+            toggle.textContent = '▼';
+        }
+    }
+
+    function populateVlanCheckboxes() {
+        const dhcpVlanConfig = document.getElementById('dhcp-vlan-config');
+        
+        if (!availableVlans.length) {
+            dhcpVlanConfig.innerHTML = '<p class="text-dim text-sm">No VLANs found in selected networks</p>';
+            return;
+        }
+        
+        const configHtml = availableVlans.map(vlan => `
+            <div class="vlan-config-item">
+                <label style="display: flex; align-items: center; gap: 8px; flex: 1;">
+                    <input type="checkbox" class="dhcp-vlan-checkbox" value="${vlan}">
+                    <span style="min-width: 80px;"><strong>VLAN ${vlan}</strong></span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px;">
+                    <span class="text-dim text-sm">Lease Time:</span>
+                    <input type="text" class="dhcp-lease-time" data-vlan="${vlan}" 
+                           placeholder="e.g., 1 day" style="width: 120px;">
+                </label>
+            </div>
+        `).join('');
+        
+        dhcpVlanConfig.innerHTML = configHtml;
+    }
+
     // ─── Server Parsing ──────────────────────────────
     // Preserves order (first = highest priority). Port is optional — defaults to 1812/1813.
     function parseHostPort(text, defaultPort) {
@@ -323,47 +516,62 @@
         }
     }
 
-    // ─── DNS Sync ────────────────────────────────────
-    async function startDnsSync() {
+    // ─── DHCP Sync ───────────────────────────────────
+    async function startDhcpSync() {
         const orgId = document.getElementById('org-select').value;
         if (!orgId) return alert('Select an organization first');
-        const vlans = document.getElementById('dns-vlans').value.split(',').map(v => parseInt(v.trim())).filter(Boolean);
-        const dnsServers = document.getElementById('dns-servers').value.trim();
-        if (!vlans.length) return alert('Enter target VLANs');
-        if (!dnsServers) return alert('Enter DNS servers');
-
+        
+        const dnsServers = document.getElementById('dhcp-dns-servers').value.trim();
+        const checkedVlans = document.querySelectorAll('.dhcp-vlan-checkbox:checked');
+        
+        if (!checkedVlans.length) return alert('Select at least one VLAN');
+        
+        // Build vlan_settings object: {vlan_id: {dns_servers, lease_time}}
+        const vlanSettings = {};
+        checkedVlans.forEach(checkbox => {
+            const vlanId = checkbox.value;
+            const leaseInput = document.querySelector(`.dhcp-lease-time[data-vlan="${vlanId}"]`);
+            const leaseTime = leaseInput ? leaseInput.value.trim() : '';
+            
+            vlanSettings[vlanId] = {
+                dns_servers: dnsServers,
+                lease_time: leaseTime
+            };
+        });
+        
         const networkIds = getSelectedNetworkIds();
-        const count = networkIds.length || 'ALL';
-        if (!confirm(`Sync DNS servers to VLANs ${vlans.join(', ')} on ${count} network(s)?`)) return;
+        const count = networkIds.length;
+        const vlans = Object.keys(vlanSettings).join(', ');
+        
+        if (!confirm(`Update DHCP settings on VLANs ${vlans} across ${count} network(s)?`)) return;
 
-        document.getElementById('dns-btn').disabled = true;
-        document.getElementById('dns-cancel').disabled = false;
-        document.getElementById('dns-console').innerHTML = '';
+        document.getElementById('dhcp-btn').disabled = true;
+        document.getElementById('dhcp-cancel').disabled = false;
+        document.getElementById('dhcp-console').innerHTML = '';
 
         try {
-            const resp = await fetch('/sync/api/dns-sync', {
+            const resp = await fetch('/sync/api/dhcp-sync', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     org_id: orgId,
                     network_ids: networkIds,
-                    target_vlans: vlans,
-                    dns_servers: dnsServers,
+                    vlan_settings: vlanSettings
                 }),
             });
             const data = await resp.json();
             if (!resp.ok) {
                 alert('Error: ' + (data.error || resp.statusText));
-                document.getElementById('dns-btn').disabled = false;
-                document.getElementById('dns-cancel').disabled = true;
+                document.getElementById('dhcp-btn').disabled = false;
+                document.getElementById('dhcp-cancel').disabled = true;
                 return;
             }
-            dnsJobId = data.job_id;
-            pollJob(`/sync/api/job/${dnsJobId}`, d => updateSyncStatus('dns', d));
+            dhcpJobId = data.job_id;
+            pollJob(`/sync/api/job/${dhcpJobId}`, d => updateSyncStatus('dhcp', d));
         } catch (e) {
             alert('Error: ' + (e.message || JSON.stringify(e)));
-            document.getElementById('dns-btn').disabled = false;
-            document.getElementById('dns-cancel').disabled = true;
+            document.getElementById('dhcp-btn').disabled = false;
+            document.getElementById('dhcp-cancel').disabled = true;
         }
     }
 
@@ -383,10 +591,10 @@
             document.getElementById('radius-updated').textContent = data.updated;
             document.getElementById('radius-errors').textContent = data.errors;
             document.getElementById('radius-nomatch').textContent = data.no_match;
-        } else {
-            document.getElementById('dns-updated').textContent = data.updated;
-            document.getElementById('dns-skipped').textContent = data.skipped;
-            document.getElementById('dns-err').textContent = data.errors;
+        } else if (type === 'dhcp') {
+            document.getElementById('dhcp-updated').textContent = data.updated;
+            document.getElementById('dhcp-skipped').textContent = data.skipped;
+            document.getElementById('dhcp-err').textContent = data.errors;
         }
 
         if (data.log) {
@@ -408,7 +616,7 @@
     }
 
     async function cancelSync(type) {
-        const jobId = type === 'radius' ? radiusJobId : dnsJobId;
+        const jobId = type === 'radius' ? radiusJobId : dhcpJobId;
         if (jobId) await API.post(`/sync/api/job/${jobId}/cancel`, {});
     }
 

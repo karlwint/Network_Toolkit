@@ -500,12 +500,6 @@
             return div.innerHTML;
         }
 
-        // Heartbeat — tells the server the browser is still open.
-        // If all tabs close, the server auto-shuts down after 15 seconds.
-        setInterval(() => {
-            fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
-        }, 5000);
-
         // Populate sidebar nav icons
         const iconMap = {
             {% for mod in modules %}'{{ mod.id }}': '{{ mod.icon }}',{% endfor %}

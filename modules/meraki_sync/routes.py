@@ -74,6 +74,102 @@ def sync_index():
     return render_template('sync/index.html', has_key=has_key)
 
 
+@sync_bp.route('/api/network-configs', methods=['POST'])
+@require_meraki_dashboard_key
+def get_network_configs():
+    """Fetch current RADIUS, DNS, and DHCP configs for selected networks."""
+    data = request.json
+    org_id = data.get('org_id')
+    network_ids = data.get('network_ids', [])
+    
+    if not org_id:
+        return jsonify({"error": "Organization not selected"}), 400
+    if not network_ids:
+        return jsonify({"error": "No networks selected"}), 400
+    
+    api_key = get_meraki_dashboard_key()
+    dashboard = get_dashboard(api_key)
+    
+    configs = []
+    all_vlans = set()
+    
+    for net_id in network_ids:
+        try:
+            # Get network info
+            network = api_call(dashboard.networks.getNetwork, net_id)
+            if not network:
+                continue
+                
+            net_config = {
+                "id": net_id,
+                "name": network.get('name', 'Unknown'),
+                "productTypes": network.get('productTypes', []),
+                "radius": {},
+                "vlans": []
+            }
+            
+            # Get RADIUS config if wireless/appliance
+            if 'wireless' in network.get('productTypes', []):
+                try:
+                    ssids = api_call(dashboard.wireless.getNetworkWirelessSsids, net_id)
+                    if ssids:
+                        for ssid in ssids:
+                            if ssid.get('name'):
+                                net_config['radius'][f"MR-{ssid.get('name')}"] = {
+                                    "authServers": ssid.get('radiusServers', []),
+                                    "acctServers": ssid.get('radiusAccountingServers', [])
+                                }
+                except Exception:
+                    pass
+            
+            if 'appliance' in network.get('productTypes', []):
+                try:
+                    ssids = api_call(dashboard.appliance.getNetworkApplianceSsids, net_id)
+                    if ssids:
+                        for ssid in ssids:
+                            if ssid.get('name'):
+                                net_config['radius'][f"MX-{ssid.get('name')}"] = {
+                                    "authServers": ssid.get('radiusServers', []),
+                                    "acctServers": ssid.get('radiusAccountingServers', [])
+                                }
+                except Exception:
+                    pass
+                
+                # Get VLAN configs
+                try:
+                    vlan_settings = api_call(dashboard.appliance.getNetworkApplianceVlansSettings, net_id)
+                    if vlan_settings and vlan_settings.get('vlansEnabled'):
+                        vlans = api_call(dashboard.appliance.getNetworkApplianceVlans, net_id)
+                        if vlans:
+                            for vlan in vlans:
+                                vlan_id = vlan.get('id')
+                                all_vlans.add(vlan_id)
+                                net_config['vlans'].append({
+                                    "id": vlan_id,
+                                    "name": vlan.get('name', ''),
+                                    "dnsNameservers": vlan.get('dnsNameservers', ''),
+                                    "dhcpDnsServers": vlan.get('dhcpDnsServers', '')
+                                })
+                except Exception:
+                    pass
+            
+            configs.append(net_config)
+            
+        except Exception as e:
+            configs.append({
+                "id": net_id,
+                "name": "Error loading",
+                "error": str(e),
+                "radius": {},
+                "vlans": []
+            })
+    
+    return jsonify({
+        "configs": configs,
+        "availableVlans": sorted(list(all_vlans))
+    })
+
+
 @sync_bp.route('/api/radius-sync', methods=['POST'])
 @require_meraki_dashboard_key
 def start_radius_sync():
@@ -186,34 +282,30 @@ def start_radius_sync():
     return jsonify({"job_id": job_id})
 
 
-@sync_bp.route('/api/dns-sync', methods=['POST'])
+@sync_bp.route('/api/dhcp-sync', methods=['POST'])
 @require_meraki_dashboard_key
-def start_dns_sync():
+def start_dhcp_sync():
     data = request.json
     org_id = data.get('org_id')
     selected_ids = data.get('network_ids', [])
-    target_vlans = data.get('target_vlans', [])
-    dns_servers = data.get('dns_servers', '')
-
+    vlan_settings = data.get('vlan_settings', {})  # {vlan_id: {dns_servers, lease_time}}
+    
     if not org_id:
         return jsonify({"error": "Organization not selected"}), 400
-    if not target_vlans:
-        return jsonify({"error": "No target VLANs specified"}), 400
-    if not dns_servers.strip():
-        return jsonify({"error": "No DNS servers provided"}), 400
+    if not vlan_settings:
+        return jsonify({"error": "No VLAN settings provided"}), 400
 
-    job_id = "dns_" + datetime.now().strftime('%Y%m%d_%H%M%S')
-    job = SyncJob(job_id, "dns")
+    job_id = "dhcp_" + datetime.now().strftime('%Y%m%d_%H%M%S')
+    job = SyncJob(job_id, "dhcp")
     job.status = "running"
     with _sync_lock:
         _sync_jobs[job_id] = job
 
     api_key = get_meraki_dashboard_key()
 
-    def run_dns_sync():
+    def run_dhcp_sync():
         dashboard = get_dashboard(api_key)
-        job.log.append(f"Target VLANs: {target_vlans}")
-        job.log.append(f"DNS Servers: {dns_servers.replace(chr(10), ', ')}")
+        job.log.append(f"Updating {len(vlan_settings)} VLAN(s)")
 
         networks = api_call(dashboard.organizations.getOrganizationNetworks,
                             org_id, total_pages='all')
@@ -223,10 +315,11 @@ def start_dns_sync():
             sel = set(selected_ids)
             mx_networks = [n for n in mx_networks if n['id'] in sel]
 
-        job.total = len(mx_networks)
-        job.log.append(f"Syncing {len(mx_networks)} MX network(s)")
+        job.total = len(mx_networks) * len(vlan_settings)
+        job.log.append(f"Syncing across {len(mx_networks)} network(s)")
 
-        for i, network in enumerate(mx_networks, 1):
+        progress = 0
+        for network in mx_networks:
             if job.cancel_event.is_set():
                 break
             net_id, net_name = network['id'], network['name']
@@ -235,44 +328,78 @@ def start_dns_sync():
                 settings = api_call(dashboard.appliance.getNetworkApplianceVlansSettings, net_id)
                 if not settings or not settings.get('vlansEnabled', False):
                     job.skipped.append({"network": net_name, "reason": "VLANs not enabled"})
-                    job.progress = i
+                    progress += len(vlan_settings)
+                    job.progress = progress
                     continue
             except Exception as e:
                 job.errors.append({"network": net_name, "error": str(e)})
-                job.progress = i
+                progress += len(vlan_settings)
+                job.progress = progress
                 continue
 
             try:
                 vlans = api_call(dashboard.appliance.getNetworkApplianceVlans, net_id)
                 if not vlans:
-                    job.progress = i
+                    progress += len(vlan_settings)
+                    job.progress = progress
                     continue
                 vlan_ids = {v['id'] for v in vlans}
             except Exception as e:
                 job.errors.append({"network": net_name, "error": str(e)})
-                job.progress = i
+                progress += len(vlan_settings)
+                job.progress = progress
                 continue
 
-            for vlan_id in target_vlans:
+            for vlan_id, vlan_config in vlan_settings.items():
+                vlan_id = int(vlan_id)
                 if vlan_id not in vlan_ids:
                     job.skipped.append({"network": net_name, "reason": f"VLAN {vlan_id} not found"})
+                    progress += 1
+                    job.progress = progress
                     continue
+                
                 try:
+                    update_params = {}
+                    dns_servers_raw = vlan_config.get('dns_servers', '').strip()
+                    lease_time = vlan_config.get('lease_time', '').strip()
+                    
+                    # Default to 4 hours if no lease time specified
+                    if not lease_time:
+                        lease_time = '4 hours'
+                    
+                    # Format DNS servers - convert newlines to proper format
+                    if dns_servers_raw:
+                        # Split by newlines, strip whitespace, filter empty lines
+                        dns_list = [ip.strip() for ip in dns_servers_raw.split('\n') if ip.strip()]
+                        # Join with newline (Meraki expects newline-separated string)
+                        dns_servers = '\n'.join(dns_list)
+                        update_params['dhcpDnsServers'] = dns_servers
+                    
+                    update_params['dhcpLeaseTime'] = lease_time
+                    
+                    job.log.append(f"  Updating VLAN {vlan_id} with params: {update_params}")
                     api_call(dashboard.appliance.updateNetworkApplianceVlan,
-                             net_id, vlan_id, dnsNameservers=dns_servers)
+                             net_id, vlan_id, **update_params)
+                    update_msg = []
+                    if dns_servers_raw:
+                        update_msg.append(f"DNS: {', '.join(dns_list)}")
+                    update_msg.append(f"Lease: {lease_time}")
                     job.updated.append({"network": net_name, "vlan": vlan_id})
-                    job.log.append(f"  ✅ {net_name} — VLAN {vlan_id} DNS updated")
+                    job.log.append(f"  ✅ {net_name} — VLAN {vlan_id} ({', '.join(update_msg)})")
+                        
                 except Exception as e:
-                    job.errors.append({"network": net_name, "error": str(e)})
-
-            job.progress = i
+                    job.errors.append({"network": net_name, "vlan": vlan_id, "error": str(e)})
+                    job.log.append(f"  ❌ {net_name} — VLAN {vlan_id} ERROR: {str(e)}")
+                
+                progress += 1
+                job.progress = progress
 
         job.status = "complete"
         job.log.append(f"\n{'='*50}")
-        job.log.append(f"DNS Sync Complete — {len(job.updated)} updated, "
+        job.log.append(f"DHCP Sync Complete — {len(job.updated)} updated, "
                        f"{len(job.skipped)} skipped, {len(job.errors)} errors")
 
-    threading.Thread(target=run_dns_sync, daemon=True).start()
+    threading.Thread(target=run_dhcp_sync, daemon=True).start()
     return jsonify({"job_id": job_id})
 
 

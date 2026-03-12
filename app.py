@@ -270,45 +270,9 @@ def server_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-# ─── Heartbeat / Auto-shutdown for windowless (.pyw) mode ─────
-_last_heartbeat = None
-_heartbeat_lock = threading.Lock()
-
-
-@app.route('/api/heartbeat', methods=['POST'])
-def heartbeat():
-    """Browser pings this to signal it's still open."""
-    global _last_heartbeat
-    with _heartbeat_lock:
-        _last_heartbeat = time.time()
-    return jsonify({"ok": True})
-
-
-@app.route('/api/shutdown', methods=['POST'])
-def shutdown():
-    """Graceful shutdown triggered by browser."""
-    os._exit(0)
-
-
-def _heartbeat_watchdog(timeout=15):
-    """Background thread: if no heartbeat for `timeout` seconds, shut down."""
-    global _last_heartbeat
-    import time as _time
-    while True:
-        _time.sleep(5)
-        with _heartbeat_lock:
-            if _last_heartbeat and (_time.time() - _last_heartbeat > timeout):
-                print("[SHUTDOWN] No browser heartbeat — exiting.")
-                os._exit(0)
-
-
 if __name__ == '__main__':
     import webbrowser
     import threading
-    import time
-
-    # Start heartbeat watchdog
-    threading.Thread(target=_heartbeat_watchdog, daemon=True).start()
 
     # Open browser after a short delay so Flask has time to start
     threading.Timer(1.2, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
