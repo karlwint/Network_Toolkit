@@ -154,7 +154,7 @@ MODULES = [
     },
     {
         "id": "inventory",
-        "name": "Stack Inventory",
+        "name": "Cisco Inventory",
         "icon": "layers",
         "description": "Stack-aware Cisco switch inventory with Excel export (version, members, hardware)",
         "url": "/inventory",

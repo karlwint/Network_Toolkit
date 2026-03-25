@@ -1,5 +1,5 @@
 """
-Cisco Switch Stack Inventory — Blueprint
+Cisco Inventory — Blueprint
 Web-based port of cisco_inventory_gui.py.
 
 Stack-aware inventory collection running:
@@ -369,7 +369,7 @@ def _write_excel(stack_rows, member_rows, hw_rows):
     # Summary
     ws = wb.active
     ws.title = "Summary"
-    ws["A1"] = "Cisco Switch Stack Inventory Report"
+    ws["A1"] = "Cisco Inventory Report"
     ws["A1"].font = Font(bold=True, size=16, name="Arial", color="1F4E79")
     ws["A2"] = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     ws["A2"].font = Font(italic=True, size=10, name="Arial", color="595959")

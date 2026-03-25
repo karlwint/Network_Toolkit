@@ -1,0 +1,368 @@
+{% extends "base.html" %}
+{% block title %}Client Locator — Network Toolkit{% endblock %}
+{% block page_title %}Client Locator{% endblock %}
+
+{% block extra_css %}
+.client-card {
+    background: var(--bg-mid); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-bottom: 16px;
+}
+.info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.info-item { display: flex; flex-direction: column; gap: 4px; }
+.info-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+.info-value { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-primary); }
+.service-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    transition: all 0.15s;
+    text-decoration: none;
+}
+.service-btn.success { background: var(--success); color: #000; }
+.service-btn.error { background: var(--error); color: #fff; opacity: 0.5; }
+.service-btn.link { background: var(--accent-bg); color: var(--accent); }
+.service-btn.link:hover { background: var(--accent); color: #000; }
+.topology-canvas {
+    height: 500px; background: var(--bg-input);
+    border: 1px solid var(--border); border-radius: 8px;
+}
+.summary-box {
+    background: var(--bg-mid); border: 2px solid var(--accent);
+    border-radius: 10px; padding: 16px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    white-space: pre-wrap; color: var(--text-primary);
+}
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Search Card -->
+    <div class="card mb-16">
+        <div class="card-header">
+            <div class="card-title">Find Client</div>
+        </div>
+        <div class="flex gap-12 items-end">
+            <div style="flex: 1;">
+                <label class="label">MAC Address, IP, or Hostname</label>
+                <input type="text" id="searchQuery" placeholder="00:1A:2B:3C:4D:5E · 192.168.1.100 · DESKTOP-ABC">
+            </div>
+            <button class="btn btn-primary" onclick="searchClient()">
+                <span>🔍</span> Locate Client
+            </button>
+        </div>
+        <p class="text-dim text-sm mt-8">Auto-discovers from Meraki + Cisco networks</p>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loadingCard" class="card" style="display: none;">
+        <div class="flex gap-12 items-center" style="padding: 20px;">
+            <div class="pulse" style="color: var(--accent); font-size: 18px;">⚡</div>
+            <div>
+                <div style="font-weight: 500;">Searching networks...</div>
+                <div class="text-dim text-sm" id="loadingStatus">Querying Meraki organizations</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsArea" style="display: none;">
+        <!-- Client Info -->
+        <div class="card mb-16">
+            <div class="card-header">
+                <div class="card-title">Client Information</div>
+                <span id="clientStatus" class="badge"></span>
+            </div>
+            <div class="info-grid" id="clientInfo"></div>
+        </div>
+
+        <!-- Quick Access Services -->
+        <div id="servicesCard" class="card mb-16" style="display: none;">
+            <div class="card-header"><div class="card-title">Quick Access</div></div>
+            <div class="flex gap-8" style="flex-wrap: wrap;" id="serviceButtons"></div>
+        </div>
+
+        <!-- Connection Details -->
+        <div class="card mb-16">
+            <div class="card-header"><div class="card-title">Connection Details</div></div>
+            <div id="connectionDetails"></div>
+        </div>
+
+        <!-- Topology -->
+        <div id="topologyCard" class="card mb-16" style="display: none;">
+            <div class="card-header">
+                <div class="card-title">Network Topology</div>
+                <span class="badge badge-info" id="topologyDepth"></span>
+            </div>
+            <div class="topology-canvas" id="topologyCanvas"></div>
+        </div>
+
+        <!-- Tier 1/2 Summary -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">📋 Ticket Summary</div>
+                <button class="btn btn-sm btn-secondary" onclick="copyToClipboard()">Copy</button>
+            </div>
+            <div class="summary-box" id="ticketSummary"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.2/dist/vis-network.min.js"></script>
+<script>
+let currentResults = null;
+
+// Helper functions
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return String(text || '').replace(/[&<>"']/g, m => map[m]);
+}
+
+function timeAgo(dateStr) {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    if (seconds < 2592000) return Math.floor(seconds / 86400) + 'd ago';
+    return date.toLocaleDateString();
+}
+
+async function searchClient() {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (!query) return alert('Enter a MAC, IP, or hostname');
+
+    document.getElementById('loadingCard').style.display = '';
+    document.getElementById('resultsArea').style.display = 'none';
+
+    try {
+        document.getElementById('loadingStatus').textContent = 'Querying Meraki organizations...';
+        
+        const resp = await fetch('/locator/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+
+        const results = await resp.json();
+        if (!resp.ok) throw new Error(results.error || 'Search failed');
+
+        currentResults = results;
+        displayResults(results);
+    } catch (err) {
+        alert('Error: ' + err.message);
+    } finally {
+        document.getElementById('loadingCard').style.display = 'none';
+    }
+}
+
+function displayResults(r) {
+    document.getElementById('resultsArea').style.display = '';
+
+    const info = r.client_info;
+    if (!info) {
+        document.getElementById('clientInfo').innerHTML = '<p class="text-dim">No client found</p>';
+        return;
+    }
+
+    // Status badge
+    const isOnline = info.ip && r.meraki.length > 0;
+    const badge = document.getElementById('clientStatus');
+    badge.textContent = isOnline ? 'Online' : 'Offline';
+    badge.className = isOnline ? 'badge badge-success' : 'badge badge-error';
+
+    // Client info grid
+    document.getElementById('clientInfo').innerHTML = `
+        ${infoItem('MAC Address', info.mac)}
+        ${infoItem('IP Address', info.ip || 'N/A')}
+        ${infoItem('Vendor', info.vendor)}
+        ${infoItem('VLAN', info.vlan || 'N/A')}
+        ${infoItem('Last Seen', info.last_seen ? timeAgo(info.last_seen) : 'N/A')}
+    `;
+
+    // Services check
+    if (info.ip) checkServices(info.ip);
+
+    // Connection details
+    let connHtml = '';
+    
+    if (r.meraki.length > 0) {
+        connHtml += '<div class="section-label" style="margin-top: 0;">Meraki Networks</div>';
+        r.meraki.forEach(m => {
+            connHtml += `<div class="client-card">
+                <div class="info-grid">
+                    ${infoItem('Network', m.network_name)}
+                    ${infoItem('Device', m.device.name || 'N/A')}
+                    ${infoItem('Model', m.device.model || 'N/A')}
+                    ${infoItem('Port', m.switch_port || 'N/A')}
+                    ${infoItem('VLAN', m.vlan || 'N/A')}
+                    ${m.device.management_ip ? infoItem('Mgmt IP', m.device.management_ip) : ''}
+                </div>
+            </div>`;
+        });
+    }
+
+    if (r.cisco.length > 0) {
+        connHtml += '<div class="section-label">Cisco Switches</div>';
+        r.cisco.forEach(c => {
+            const statusClass = c.status === 'up' ? 'online' : 'offline';
+            connHtml += `<div class="client-card">
+                <div class="info-grid">
+                    ${infoItem('Switch', c.switch_name)}
+                    ${infoItem('IP', c.switch_ip)}
+                    ${infoItem('Interface', c.interface)}
+                    ${infoItem('VLAN', c.vlan)}
+                    ${infoItem('Status', `<span class="${statusClass}">${c.status.toUpperCase()}</span>`, true)}
+                    ${infoItem('Speed', c.speed)}
+                </div>
+                <button class="btn btn-sm btn-secondary mt-12" onclick="buildTopology('${c.switch_ip}')">
+                    Map Topology
+                </button>
+            </div>`;
+        });
+    }
+
+    if (!connHtml) connHtml = '<p class="text-dim">No connections found</p>';
+    document.getElementById('connectionDetails').innerHTML = connHtml;
+
+    // Ticket summary
+    generateTicketSummary(r);
+}
+
+async function checkServices(ip) {
+    try {
+        const resp = await fetch('/locator/api/services', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        const svc = await resp.json();
+        if (resp.ok) displayServices(svc);
+    } catch (err) { console.error('Service check failed:', err); }
+}
+
+function displayServices(svc) {
+    const btns = [];
+    
+    if (svc.ping.reachable) {
+        btns.push(`<div class="service-btn success">✓ Ping ${svc.ping.latency_ms ? '(' + svc.ping.latency_ms + 'ms)' : ''}</div>`);
+    } else {
+        btns.push(`<div class="service-btn error">✗ Unreachable</div>`);
+    }
+
+    if (svc.ssh) btns.push(`<a href="ssh://${svc.ip}" class="service-btn link">🔐 SSH</a>`);
+    if (svc.https) btns.push(`<a href="https://${svc.ip}" target="_blank" class="service-btn link">🔒 HTTPS</a>`);
+    if (svc.http) btns.push(`<a href="http://${svc.ip}" target="_blank" class="service-btn link">🌐 HTTP</a>`);
+    if (svc.rdp) btns.push(`<a href="rdp://${svc.ip}" class="service-btn link">🖥️ RDP</a>`);
+
+    if (btns.length > 0) {
+        document.getElementById('serviceButtons').innerHTML = btns.join('');
+        document.getElementById('servicesCard').style.display = '';
+    }
+}
+
+async function buildTopology(switchIp) {
+    const card = document.getElementById('topologyCard');
+    card.style.display = '';
+    document.getElementById('topologyCanvas').innerHTML = '<p class="pulse" style="text-align: center; padding: 60px; color: var(--accent);">Building topology...</p>';
+
+    try {
+        const resp = await fetch('/locator/api/topology', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ switch_ip: switchIp, max_depth: 3 })
+        });
+        const topo = await resp.json();
+        if (!resp.ok) throw new Error(topo.error);
+        
+        renderTopology(topo);
+        document.getElementById('topologyDepth').textContent = `${topo.nodes.length} devices`;
+    } catch (err) {
+        document.getElementById('topologyCanvas').innerHTML = `<p style="color: var(--error); text-align: center; padding: 60px;">${err.message}</p>`;
+    }
+}
+
+function renderTopology(topo) {
+    const nodes = new vis.DataSet(topo.nodes.map(n => ({
+        id: n.id, label: n.label,
+        color: { background: n.depth === 0 ? '#00D4AA' : '#171C23', border: '#00D4AA' },
+        font: { color: '#E8ECF1', size: 12 }
+    })));
+
+    const edges = new vis.DataSet(topo.edges.map(e => ({
+        from: e.from, to: e.to, label: e.label,
+        color: { color: e.protocol === 'CDP' ? '#34D399' : '#FBBF24' },
+        font: { color: '#8B95A5', size: 10 }
+    })));
+
+    new vis.Network(document.getElementById('topologyCanvas'), { nodes, edges }, {
+        nodes: { shape: 'box', margin: 10 },
+        edges: { arrows: 'to', smooth: { type: 'cubicBezier' } },
+        physics: { stabilization: { iterations: 100 } },
+        layout: { hierarchical: { direction: 'UD', sortMethod: 'directed', levelSeparation: 120 } }
+    });
+}
+
+function generateTicketSummary(r) {
+    const info = r.client_info;
+    let summary = '';
+
+    if (r.cisco.length > 0) {
+        const c = r.cisco[0];
+        summary = `CLIENT LOCATED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Switch:  ${c.switch_name} (${c.switch_ip})
+Port:    ${c.interface}
+VLAN:    ${c.vlan}
+Status:  ${c.status.toUpperCase()} @ ${c.speed}
+
+Client Info:
+  MAC:      ${info.mac}
+  IP:       ${info.ip || 'N/A'}
+  Vendor:   ${info.vendor}
+  Last Seen: ${info.last_seen ? new Date(info.last_seen).toLocaleString() : 'N/A'}`;
+    } else if (r.meraki.length > 0) {
+        const m = r.meraki[0];
+        summary = `CLIENT LOCATED (Meraki)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Network: ${m.network_name}
+Device:  ${m.device.name || 'N/A'}
+Port:    ${m.switch_port || 'N/A'}
+VLAN:    ${m.vlan || 'N/A'}
+
+Client Info:
+  MAC:      ${info.mac}
+  IP:       ${info.ip || 'N/A'}
+  Vendor:   ${info.vendor}
+  Last Seen: ${info.last_seen ? new Date(info.last_seen).toLocaleString() : 'N/A'}`;
+    } else {
+        summary = 'No connection details found';
+    }
+
+    document.getElementById('ticketSummary').textContent = summary;
+}
+
+function copyToClipboard() {
+    const text = document.getElementById('ticketSummary').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('✓ Copied to clipboard');
+    }).catch(err => alert('Copy failed: ' + err));
+}
+
+function infoItem(label, value, isHtml = false) {
+    return `<div class="info-item">
+        <div class="info-label">${escapeHtml(label)}</div>
+        <div class="info-value">${isHtml ? value : escapeHtml(value || '—')}</div>
+    </div>`;
+}
+</script>
+{% endblock %}
